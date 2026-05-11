@@ -15,7 +15,6 @@ if (process.env.CLIENT_ORIGIN) {
 }
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(clientDir));
-
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'paper-lens-api' });
 });
