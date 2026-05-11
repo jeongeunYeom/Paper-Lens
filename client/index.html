@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Paper Lens | PDF 논문 요약</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero" aria-labelledby="page-title">
+        <p class="eyebrow">Paper Lens</p>
+        <h1 id="page-title">PDF 논문 요약 및 유사 논문 추천</h1>
+        <p class="hero-copy">PDF 파일을 업로드하면 텍스트 추출, AI 요약, 실제 논문 검색 결과 기반 추천, 요약 PDF 다운로드까지 웹에서 바로 처리합니다.</p>
+      </section>
+
+      <section id="upload-card" class="upload-card" aria-labelledby="upload-title">
+        <div class="upload-icon">PDF</div>
+        <h2 id="upload-title">논문 PDF를 업로드하세요</h2>
+        <p>드래그앤드롭하거나 버튼을 눌러 파일을 선택할 수 있습니다. OCR이 필요한 스캔 PDF는 첫 버전에서 지원하지 않습니다.</p>
+        <input id="file-input" type="file" accept="application/pdf,.pdf" hidden />
+        <button id="select-file-button" type="button" class="primary-button">PDF 파일 선택</button>
+        <p id="upload-message" class="inline-error" role="alert" hidden></p>
+      </section>
+
+      <section id="status-card" class="status-card" aria-live="polite" hidden>
+        <div class="spinner" aria-hidden="true"></div>
+        <div>
+          <strong>분석 진행 상태</strong>
+          <p id="status-message">처리 중입니다.</p>
+        </div>
+      </section>
+
+      <div id="error-banner" class="error-banner" role="alert" hidden></div>
+
+      <section id="results" class="results" hidden></section>
+    </main>
+
+    <template id="results-template">
+      <div class="result-header">
+        <div>
+          <p class="eyebrow">분석 완료</p>
+          <h2 data-field="title"></h2>
+          <p class="muted" data-field="fileMeta"></p>
+        </div>
+        <div class="actions">
+          <a data-field="downloadLink" class="primary-button" href="#">요약 PDF 다운로드</a>
+          <button data-field="resetButton" type="button" class="secondary-button">새 PDF 분석</button>
+        </div>
+      </div>
+    </template>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>
