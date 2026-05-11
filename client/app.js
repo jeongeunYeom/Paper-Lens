@@ -31,6 +31,11 @@ function validateAndAnalyze(file) {
   clearMessages();
   if (!file) return;
 
+  if (isGitHubPagesWithoutApi()) {
+    showError('GitHub Pages는 정적 파일만 호스팅하므로 PDF 분석 서버 API를 실행할 수 없습니다. 로컬에서 npm run dev로 실행하거나 별도 서버에 배포한 API 주소를 PAPER_LENS_API_BASE_URL로 설정해 주세요.');
+    return;
+  }
+
   if (file.type !== 'application/pdf' || !file.name.toLowerCase().endsWith('.pdf')) {
     showUploadMessage('PDF 파일만 업로드할 수 있습니다.');
     return;
@@ -196,6 +201,10 @@ function createRecommendationList(recommendations) {
   }
 
   return list;
+}
+
+function isGitHubPagesWithoutApi() {
+  return window.location.hostname.endsWith('github.io') && !window.PAPER_LENS_API_BASE_URL;
 }
 
 function setBusy(isBusy, message = '') {

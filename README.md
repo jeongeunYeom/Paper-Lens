@@ -77,6 +77,8 @@ README.md
 
 Express 서버가 정적 HTML 화면과 `/api` 엔드포인트를 함께 제공합니다.
 
+
+## GitHub Pages 안내
 ## 환경변수
 
 | 변수 | 필수 | 설명 |
