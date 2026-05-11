@@ -35,6 +35,170 @@ const SUMMARY_SCHEMA = {
 };
 
 const client = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+<<<<<<< codex/create-web-app-for-pdf-analysis-and-summary-pb1b0o
+const isMockSummaryEnabled = ['true', '1', 'yes', 'on'].includes(String(process.env.USE_MOCK_SUMMARY || '').trim().toLowerCase());
+const FALLBACK_MESSAGE = 'OpenAI API 없이 규칙 기반으로 추출한 요약입니다. 실제 AI 요약보다 정확도가 낮을 수 있습니다.';
+const STOPWORDS = new Set([
+  'the', 'and', 'for', 'that', 'with', 'this', 'from', 'are', 'was', 'were', 'have', 'has', 'had', 'not', 'but',
+  'paper', 'study', 'research', 'using', 'based', 'between', 'these', 'those', 'their', 'which', 'into', 'than',
+  '논문', '연구', '결과', '방법', '분석', '대한', '통해', '위한', '있다', '있는', '한다', '에서', '으로', '그리고'
+]);
+
+// OpenAI 키가 있으면 AI 요약을 사용하고, 없거나 실패하면 규칙 기반 요약으로 앱 흐름을 계속 진행합니다.
+export async function summarizePaper(text, pdfMetadata = {}) {
+  if (isMockSummaryEnabled) {
+    return createMockSummary(text, pdfMetadata);
+  }
+
+  if (!client) {
+    return createRuleBasedSummary(text, pdfMetadata, 'OPENAI_API_KEY가 없어 규칙 기반 요약을 사용했습니다.');
+  }
+
+  try {
+    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    const truncatedText = text.slice(0, 70000);
+
+    const completion = await client.chat.completions.create({
+      model,
+      temperature: 0.2,
+      response_format: { type: 'json_schema', json_schema: SUMMARY_SCHEMA },
+      messages: [
+        {
+          role: 'system',
+          content: [
+            '당신은 학술 논문 분석 도우미입니다.',
+            '제공된 PDF 텍스트에 근거해서만 한국어 요약 보고서를 작성하세요.',
+            '알 수 없는 항목은 추측하지 말고 "확인할 수 없음"이라고 쓰세요.',
+            '핵심 키워드는 반드시 5개만 반환하세요.'
+          ].join('\n')
+        },
+        {
+          role: 'user',
+          content: `PDF 메타데이터: ${JSON.stringify(pdfMetadata)}\n\n논문 텍스트:\n${truncatedText}`
+        }
+      ]
+    });
+
+    return JSON.parse(completion.choices[0].message.content);
+  } catch (error) {
+    console.warn('OpenAI summarization failed; falling back to rule-based summary:', error.message);
+    return createRuleBasedSummary(text, pdfMetadata, `OpenAI API 호출 실패(${error.status || error.code || 'unknown'})로 규칙 기반 요약을 사용했습니다.`);
+  }
+}
+
+function createRuleBasedSummary(text, pdfMetadata = {}, reason = FALLBACK_MESSAGE) {
+  const normalized = normalizeText(text);
+  const abstract = extractSection(normalized, ['abstract', '초록', '요약'], ['introduction', '1 introduction', '서론', 'keywords', '키워드']);
+  const introduction = extractSection(normalized, ['introduction', '서론', 'background'], ['method', 'methods', 'materials', '방법', 'methodology']);
+  const methods = extractSection(normalized, ['method', 'methods', 'materials and methods', 'methodology', '방법'], ['result', 'results', '결과', 'discussion']);
+  const results = extractSection(normalized, ['result', 'results', 'findings', '결과'], ['discussion', 'conclusion', '결론', 'limitations']);
+  const limitations = extractSection(normalized, ['limitation', 'limitations', '한계', '제한점'], ['conclusion', 'references', 'acknowledg']);
+  const conclusion = extractSection(normalized, ['conclusion', 'conclusions', '결론'], ['references', '참고문헌']);
+  const keywords = extractKeywords(normalized);
+
+  return {
+    title: pdfMetadata.Title || guessTitle(normalized) || '제목 확인 필요',
+    authors: parseAuthors(pdfMetadata.Author),
+    publicationYear: guessPublicationYear(normalized, pdfMetadata),
+    abstract: truncate(abstract || normalized, 900),
+    background: withFallback(introduction, '서론/배경 섹션을 명확히 찾지 못했습니다. 추출 텍스트 앞부분을 참고해 주세요.'),
+    purpose: inferPurpose(abstract || introduction || normalized),
+    methods: withFallback(methods, '방법 섹션을 명확히 찾지 못했습니다.'),
+    keyFindings: withFallback(results || conclusion, '결과/결론 섹션을 명확히 찾지 못했습니다.'),
+    limitations: withFallback(limitations, '한계점 섹션을 명확히 찾지 못했습니다. 원문에서 limitations 또는 discussion 섹션을 확인해 주세요.'),
+    keywords,
+    oneParagraphSummary: `${reason} ${truncate(abstract || conclusion || normalized, 500)}`
+  };
+}
+
+function createMockSummary(text, pdfMetadata = {}) {
+  const normalized = normalizeText(text);
+  const title = pdfMetadata.Title || guessTitle(normalized) || '테스트용 논문 제목';
+
+  return {
+    title: `[테스트 모드] ${title}`,
+    authors: ['테스트 저자'],
+    publicationYear: String(pdfMetadata.CreationDate?.match(/\d{4}/)?.[0] || new Date().getFullYear()),
+    abstract: normalized.slice(0, 600) || '테스트 모드에서 생성된 초록입니다.',
+    background: 'OpenAI API quota 또는 결제 설정 없이 업로드부터 결과 표시까지 확인하기 위한 테스트 모드 요약입니다.',
+    purpose: 'PDF 텍스트 추출, 화면 렌더링, 추천 논문 영역, 요약 PDF 다운로드 흐름이 정상 동작하는지 검증합니다.',
+    methods: '업로드된 PDF에서 추출한 텍스트 일부와 PDF 메타데이터를 이용해 서버 내부에서 고정 형식의 mock 요약을 생성합니다.',
+    keyFindings: normalized ? `추출 텍스트가 정상적으로 확인되었습니다. 텍스트 앞부분: ${normalized.slice(0, 220)}` : '추출된 텍스트가 제한적입니다.',
+    limitations: '이 결과는 실제 AI 요약이 아니므로 논문 내용의 정확한 학술적 해석이나 최종 결과로 사용하면 안 됩니다.',
+    keywords: ['테스트 모드', 'PDF 분석', '논문 요약', '업로드 검증', '보고서 생성'],
+    oneParagraphSummary: '현재 결과는 OpenAI API를 호출하지 않고 생성된 테스트용 요약입니다. 배포와 UI 흐름을 빠르게 검증한 뒤 실제 서비스에서는 USE_MOCK_SUMMARY를 false로 바꾸고 유효한 OPENAI_API_KEY를 설정하세요.'
+  };
+}
+
+function normalizeText(text) {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function extractSection(text, startMarkers, endMarkers) {
+  const lower = text.toLowerCase();
+  const starts = startMarkers.map((marker) => lower.indexOf(marker.toLowerCase())).filter((index) => index >= 0);
+  if (!starts.length) return '';
+
+  const start = Math.min(...starts);
+  const afterStart = start + 1;
+  const ends = endMarkers
+    .map((marker) => lower.indexOf(marker.toLowerCase(), afterStart + 80))
+    .filter((index) => index > start);
+  const end = ends.length ? Math.min(...ends) : Math.min(text.length, start + 1800);
+  return truncate(text.slice(start, end), 1200);
+}
+
+function extractKeywords(text) {
+  const counts = new Map();
+  const matches = text.toLowerCase().match(/[a-zA-Z][a-zA-Z-]{3,}|[가-힣]{2,}/g) || [];
+  for (const word of matches) {
+    const cleaned = word.replace(/^-|-$/g, '');
+    if (STOPWORDS.has(cleaned) || cleaned.length < 2) continue;
+    counts.set(cleaned, (counts.get(cleaned) || 0) + 1);
+  }
+
+  const keywords = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([word]) => word)
+    .filter((word, index, array) => array.findIndex((item) => item.includes(word) || word.includes(item)) === index)
+    .slice(0, 5);
+
+  return [...keywords, 'PDF 분석', '논문 요약', '연구 방법', '주요 결과', '한계점'].slice(0, 5);
+}
+
+function inferPurpose(text) {
+  const sentences = splitSentences(text);
+  const purposeSentence = sentences.find((sentence) => /aim|objective|purpose|goal|investigate|propose|목적|목표|제안|분석/.test(sentence.toLowerCase()));
+  return truncate(purposeSentence || sentences[0] || '연구 목적을 명확히 찾지 못했습니다.', 700);
+}
+
+function splitSentences(text) {
+  return text.split(/(?<=[.!?。])\s+/).map((sentence) => sentence.trim()).filter(Boolean);
+}
+
+function parseAuthors(authorMetadata) {
+  if (!authorMetadata) return ['확인할 수 없음'];
+  return String(authorMetadata).split(/,|;| and /i).map((author) => author.trim()).filter(Boolean).slice(0, 8);
+}
+
+function guessPublicationYear(text, pdfMetadata) {
+  const metadataYear = String(pdfMetadata.CreationDate || pdfMetadata.ModDate || '').match(/\d{4}/)?.[0];
+  if (metadataYear) return metadataYear;
+  return text.match(/\b(19|20)\d{2}\b/)?.[0] || '확인할 수 없음';
+}
+
+function withFallback(value, fallback) {
+  return value ? truncate(value, 1000) : fallback;
+}
+
+function truncate(text, maxLength) {
+  const normalized = normalizeText(String(text || ''));
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+}
+
+function guessTitle(text) {
+  return text.split(/[.\n]/).find((line) => line.trim().length >= 8)?.trim().slice(0, 120);
+=======
 
 // 논문 원문 일부를 구조화된 JSON 요약으로 변환합니다. API 키는 서버 환경변수에서만 읽습니다.
 export async function summarizePaper(text, pdfMetadata = {}) {
@@ -69,4 +233,5 @@ export async function summarizePaper(text, pdfMetadata = {}) {
   });
 
   return JSON.parse(completion.choices[0].message.content);
+>>>>>>> main
 }
