@@ -94,6 +94,19 @@ USE_MOCK_SUMMARY=true
 
 이 모드에서는 PDF 텍스트 추출, 결과 화면 표시, 유사 논문 영역, 요약 PDF 다운로드 흐름을 확인할 수 있지만 실제 AI 요약은 생성하지 않습니다. 실제 서비스로 전환할 때는 `USE_MOCK_SUMMARY=false`로 바꾸고 유효한 `OPENAI_API_KEY`를 설정하세요.
 
+## Render 배포 설정
+
+Render에서는 저장소 루트를 기준으로 Web Service를 만들고 아래 설정을 사용하세요. 이 저장소에는 `render.yaml`도 포함되어 있어 Blueprint로 배포할 수도 있습니다.
+
+```text
+Root Directory: 비워두기
+Build Command: npm install
+Start Command: npm start
+Node Version: 20.x
+```
+
+서버 시작 오류를 피하려면 Render의 Root Directory를 `server`로 바꾸지 말고 비워두는 것을 권장합니다. `package.json`에는 Node 20 이상 23 미만 엔진 범위를 명시했습니다.
+
 ## GitHub Pages 안내
 
 GitHub Pages는 Node.js/Express 서버를 실행하지 않는 정적 호스팅입니다. 이 저장소에는 루트 `index.html`이 있어 Pages에서 README 대신 `client/` 웹 화면으로 이동합니다. Pages 설정은 `Deploy from a branch` 기준으로 `main` 브랜치의 `/(root)` 폴더를 선택해야 하며, 저장소 루트에는 `.nojekyll` 파일을 두어 README가 사이트 첫 화면처럼 처리되지 않게 합니다.

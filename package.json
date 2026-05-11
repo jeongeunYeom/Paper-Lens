@@ -11,5 +11,8 @@
     "start": "npm run start --workspace server",
     "build": "echo \"Static HTML client does not require a build step\"",
     "lint": "npm run lint --workspace server"
+  },
+  "engines": {
+    "node": ">=20 <23"
   }
 }

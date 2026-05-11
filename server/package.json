@@ -17,5 +17,8 @@
     "pdf-parse": "^1.1.1",
     "pdfkit": "^0.17.2"
   },
-  "devDependencies": {}
+  "devDependencies": {},
+  "engines": {
+    "node": ">=20 <23"
+  }
 }

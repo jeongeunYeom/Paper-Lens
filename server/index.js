@@ -15,15 +15,10 @@ if (process.env.CLIENT_ORIGIN) {
 }
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(clientDir));
-<<<<<<< codex/create-web-app-for-pdf-analysis-and-summary-pb1b0o
 
 app.get('/api/health', (_req, res) => {
   const mockSummaryEnabled = ['true', '1', 'yes', 'on'].includes(String(process.env.USE_MOCK_SUMMARY || '').trim().toLowerCase());
   res.json({ ok: true, service: 'paper-lens-api', mockSummaryEnabled });
-=======
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'paper-lens-api' });
->>>>>>> main
 });
 
 app.use('/api', analyzeRouter);
