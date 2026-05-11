@@ -4,13 +4,12 @@
   "private": true,
   "description": "PDF 논문 요약 및 유사 논문 추천 웹앱",
   "workspaces": [
-    "client",
     "server"
   ],
   "scripts": {
-    "dev": "node scripts/dev.mjs",
+    "dev": "npm run dev --workspace server",
     "start": "npm run start --workspace server",
-    "build": "npm run build --workspace client",
-    "lint": "npm run lint --workspace client && npm run lint --workspace server"
+    "build": "echo \"Static HTML client does not require a build step\"",
+    "lint": "npm run lint --workspace server"
   }
 }

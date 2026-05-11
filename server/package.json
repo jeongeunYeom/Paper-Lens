@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "nodemon index.js",
+    "dev": "node --watch index.js",
     "start": "node index.js",
     "lint": "node --check index.js && node --check routes/analyze.js && node --check services/pdfService.js && node --check services/openaiService.js && node --check services/paperSearchService.js && node --check services/pdfReportService.js"
   },
@@ -17,7 +17,5 @@
     "pdf-parse": "^1.1.1",
     "pdfkit": "^0.17.2"
   },
-  "devDependencies": {
-    "nodemon": "^3.1.10"
-  }
+  "devDependencies": {}
 }
