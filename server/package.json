@@ -1,0 +1,21 @@
+{
+  "name": "paper-lens-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch index.js",
+    "start": "node index.js",
+    "lint": "node --check index.js && node --check routes/analyze.js && node --check services/pdfService.js && node --check services/openaiService.js && node --check services/paperSearchService.js && node --check services/pdfReportService.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "openai": "^6.9.1",
+    "pdf-parse": "^1.1.1",
+    "pdfkit": "^0.17.2"
+  },
+  "devDependencies": {}
+}
