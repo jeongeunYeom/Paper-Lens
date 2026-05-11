@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import multer from 'multer';
 import { extractTextFromPdf } from '../services/pdfService.js';
@@ -9,7 +10,8 @@ import { searchSimilarPapers } from '../services/paperSearchService.js';
 import { createSummaryReportPdf } from '../services/pdfReportService.js';
 
 const router = express.Router();
-const uploadsDir = path.resolve('server/uploads');
+const routeDir = path.dirname(fileURLToPath(import.meta.url));
+const uploadsDir = path.resolve(routeDir, '../uploads');
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const reportCache = new Map();
 
