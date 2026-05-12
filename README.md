@@ -94,6 +94,24 @@ USE_MOCK_SUMMARY=true
 
 이 모드에서는 PDF 텍스트 추출, 결과 화면 표시, 유사 논문 영역, 요약 PDF 다운로드 흐름을 확인할 수 있지만 실제 AI 요약은 생성하지 않습니다. 실제 서비스로 전환할 때는 `USE_MOCK_SUMMARY=false`로 바꾸고 유효한 `OPENAI_API_KEY`를 설정하세요.
 
+## 보고서 UI/PDF 출력 개선 사항
+
+- 화면 결과 카드는 문장 단위 문단 분리와 bullet 목록을 사용해 보고서처럼 읽기 쉽게 표시합니다.
+- 요약 PDF는 `Paper Lens 논문 분석 보고서` 제목, 기본 정보 카드, 1~7번 본문 섹션, 유사 논문 추천 카드 순서로 생성됩니다.
+- PDF 한글 출력은 `REPORT_FONT_PATH`, `fonts/NotoSansKR-Regular.otf`, `fonts/NotoSansKR-Regular.ttf`, `fonts/Pretendard-Regular.otf`, `@fontsource/noto-sans-kr`, 시스템 Noto/Nanum 폰트 순서로 찾고, 폰트가 없으면 기본 폰트로 fallback합니다.
+- OpenAI API가 없거나 실패해도 규칙 기반 fallback이 긴 원문을 그대로 붙이지 않고 섹션·문장 단위로 최대 길이를 제한해 표시합니다.
+
+수정된 주요 파일:
+
+```text
+client/app.js
+client/styles.css
+server/services/openaiService.js
+server/services/summaryFormatService.js
+server/services/pdfReportService.js
+fonts/README.md
+```
+
 ## Render 배포 설정
 
 Render에서는 저장소 루트를 기준으로 Web Service를 만들고 아래 설정을 사용하세요. 이 저장소에는 `render.yaml`도 포함되어 있어 Blueprint로 배포할 수도 있습니다.

@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { cleanText, normalizeSummary, summarizeText, toBulletItems } from './summaryFormatService.js';
 
 const SUMMARY_SCHEMA = {
   name: 'paper_summary',
@@ -8,12 +9,12 @@ const SUMMARY_SCHEMA = {
     properties: {
       title: { type: 'string' },
       authors: { type: 'array', items: { type: 'string' } },
-      publicationYear: { type: 'string' },
+      year: { type: 'string' },
       abstract: { type: 'string' },
       background: { type: 'string' },
       purpose: { type: 'string' },
-      methods: { type: 'string' },
-      keyFindings: { type: 'string' },
+      method: { type: 'string' },
+      results: { type: 'array', items: { type: 'string' } },
       limitations: { type: 'string' },
       keywords: { type: 'array', minItems: 5, maxItems: 5, items: { type: 'string' } },
       oneParagraphSummary: { type: 'string' }
@@ -21,12 +22,12 @@ const SUMMARY_SCHEMA = {
     required: [
       'title',
       'authors',
-      'publicationYear',
+      'year',
       'abstract',
       'background',
       'purpose',
-      'methods',
-      'keyFindings',
+      'method',
+      'results',
       'limitations',
       'keywords',
       'oneParagraphSummary'
@@ -46,11 +47,11 @@ const STOPWORDS = new Set([
 // OpenAI 키가 있으면 AI 요약을 사용하고, 없거나 실패하면 규칙 기반 요약으로 앱 흐름을 계속 진행합니다.
 export async function summarizePaper(text, pdfMetadata = {}) {
   if (isMockSummaryEnabled) {
-    return createMockSummary(text, pdfMetadata);
+    return normalizeSummary(createMockSummary(text, pdfMetadata));
   }
 
   if (!client) {
-    return createRuleBasedSummary(text, pdfMetadata, 'OPENAI_API_KEY가 없어 규칙 기반 요약을 사용했습니다.');
+    return normalizeSummary(createRuleBasedSummary(text, pdfMetadata, 'OPENAI_API_KEY가 없어 규칙 기반 요약을 사용했습니다.'));
   }
 
   try {
@@ -68,7 +69,8 @@ export async function summarizePaper(text, pdfMetadata = {}) {
             '당신은 학술 논문 분석 도우미입니다.',
             '제공된 PDF 텍스트에 근거해서만 한국어 요약 보고서를 작성하세요.',
             '알 수 없는 항목은 추측하지 말고 "확인할 수 없음"이라고 쓰세요.',
-            '핵심 키워드는 반드시 5개만 반환하세요.'
+            '핵심 키워드는 반드시 5개만 반환하세요.',
+            'results는 원문 복사가 아니라 3~5개의 짧은 한국어 bullet 문장 배열로 반환하세요.'
           ].join('\n')
         },
         {
@@ -78,10 +80,10 @@ export async function summarizePaper(text, pdfMetadata = {}) {
       ]
     });
 
-    return JSON.parse(completion.choices[0].message.content);
+    return normalizeSummary(JSON.parse(completion.choices[0].message.content));
   } catch (error) {
     console.warn('OpenAI summarization failed; falling back to rule-based summary:', error.message);
-    return createRuleBasedSummary(text, pdfMetadata, `OpenAI API 호출 실패(${error.status || error.code || 'unknown'})로 규칙 기반 요약을 사용했습니다.`);
+    return normalizeSummary(createRuleBasedSummary(text, pdfMetadata, `OpenAI API 호출 실패(${error.status || error.code || 'unknown'})로 규칙 기반 요약을 사용했습니다.`));
   }
 }
 
@@ -98,15 +100,15 @@ function createRuleBasedSummary(text, pdfMetadata = {}, reason = FALLBACK_MESSAG
   return {
     title: pdfMetadata.Title || guessTitle(normalized) || '제목 확인 필요',
     authors: parseAuthors(pdfMetadata.Author),
-    publicationYear: guessPublicationYear(normalized, pdfMetadata),
+    year: guessPublicationYear(normalized, pdfMetadata),
     abstract: truncate(abstract || normalized, 900),
-    background: withFallback(introduction, '서론/배경 섹션을 명확히 찾지 못했습니다. 추출 텍스트 앞부분을 참고해 주세요.'),
+    background: withFallback(summarizeText(introduction, { maxSentences: 4, maxLength: 650 }), '서론/배경 섹션을 명확히 찾지 못했습니다.'),
     purpose: inferPurpose(abstract || introduction || normalized),
-    methods: withFallback(methods, '방법 섹션을 명확히 찾지 못했습니다.'),
-    keyFindings: withFallback(results || conclusion, '결과/결론 섹션을 명확히 찾지 못했습니다.'),
-    limitations: withFallback(limitations, '한계점 섹션을 명확히 찾지 못했습니다. 원문에서 limitations 또는 discussion 섹션을 확인해 주세요.'),
+    method: withFallback(summarizeText(methods, { maxSentences: 4, maxLength: 650 }), '방법 섹션을 명확히 찾지 못했습니다.'),
+    results: toBulletItems(results || conclusion, { maxItems: 5, maxLength: 170 }),
+    limitations: withFallback(summarizeText(limitations, { maxSentences: 3, maxLength: 480 }), '한계점 섹션을 명확히 찾지 못했습니다. 원문에서 limitations 또는 discussion 섹션을 확인해 주세요.'),
     keywords,
-    oneParagraphSummary: `${reason} ${truncate(abstract || conclusion || normalized, 500)}`
+    oneParagraphSummary: `${reason} ${summarizeText(abstract || conclusion || normalized, { maxSentences: 4, maxLength: 620 })}`
   };
 }
 
@@ -117,12 +119,12 @@ function createMockSummary(text, pdfMetadata = {}) {
   return {
     title: `[테스트 모드] ${title}`,
     authors: ['테스트 저자'],
-    publicationYear: String(pdfMetadata.CreationDate?.match(/\d{4}/)?.[0] || new Date().getFullYear()),
+    year: String(pdfMetadata.CreationDate?.match(/\d{4}/)?.[0] || new Date().getFullYear()),
     abstract: normalized.slice(0, 600) || '테스트 모드에서 생성된 초록입니다.',
     background: 'OpenAI API quota 또는 결제 설정 없이 업로드부터 결과 표시까지 확인하기 위한 테스트 모드 요약입니다.',
     purpose: 'PDF 텍스트 추출, 화면 렌더링, 추천 논문 영역, 요약 PDF 다운로드 흐름이 정상 동작하는지 검증합니다.',
-    methods: '업로드된 PDF에서 추출한 텍스트 일부와 PDF 메타데이터를 이용해 서버 내부에서 고정 형식의 mock 요약을 생성합니다.',
-    keyFindings: normalized ? `추출 텍스트가 정상적으로 확인되었습니다. 텍스트 앞부분: ${normalized.slice(0, 220)}` : '추출된 텍스트가 제한적입니다.',
+    method: '업로드된 PDF에서 추출한 텍스트 일부와 PDF 메타데이터를 이용해 서버 내부에서 고정 형식의 mock 요약을 생성합니다.',
+    results: normalized ? [`추출 텍스트가 정상적으로 확인되었습니다: ${normalized.slice(0, 150)}`, '결과 화면과 PDF 다운로드 흐름을 테스트할 수 있습니다.'] : ['추출된 텍스트가 제한적입니다.'],
     limitations: '이 결과는 실제 AI 요약이 아니므로 논문 내용의 정확한 학술적 해석이나 최종 결과로 사용하면 안 됩니다.',
     keywords: ['테스트 모드', 'PDF 분석', '논문 요약', '업로드 검증', '보고서 생성'],
     oneParagraphSummary: '현재 결과는 OpenAI API를 호출하지 않고 생성된 테스트용 요약입니다. 배포와 UI 흐름을 빠르게 검증한 뒤 실제 서비스에서는 USE_MOCK_SUMMARY를 false로 바꾸고 유효한 OPENAI_API_KEY를 설정하세요.'
@@ -130,7 +132,7 @@ function createMockSummary(text, pdfMetadata = {}) {
 }
 
 function normalizeText(text) {
-  return text.replace(/\s+/g, ' ').trim();
+  return cleanText(text);
 }
 
 function extractSection(text, startMarkers, endMarkers) {
@@ -168,7 +170,7 @@ function extractKeywords(text) {
 function inferPurpose(text) {
   const sentences = splitSentences(text);
   const purposeSentence = sentences.find((sentence) => /aim|objective|purpose|goal|investigate|propose|목적|목표|제안|분석/.test(sentence.toLowerCase()));
-  return truncate(purposeSentence || sentences[0] || '연구 목적을 명확히 찾지 못했습니다.', 700);
+  return summarizeText(purposeSentence || sentences[0] || '연구 목적을 명확히 찾지 못했습니다.', { maxSentences: 2, maxLength: 420 });
 }
 
 function splitSentences(text) {

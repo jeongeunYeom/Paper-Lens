@@ -88,12 +88,13 @@ function renderResults(analysis) {
     createCard('논문 기본 정보', createInfoList([
       ['제목', summary.title || '확인할 수 없음'],
       ['저자', summary.authors?.join(', ') || '확인할 수 없음'],
-      ['출판연도', summary.publicationYear || '확인할 수 없음']
+      ['출판연도', summary.year || summary.publicationYear || '확인할 수 없음'],
+      ['핵심 키워드', summary.keywords?.join(', ') || '확인할 수 없음']
     ])),
     createTextCard('연구 배경', summary.background),
     createTextCard('연구 목적', summary.purpose),
-    createTextCard('연구 방법', summary.methods),
-    createTextCard('주요 결과', summary.keyFindings),
+    createTextCard('연구 방법', summary.method || summary.methods),
+    createListCard('주요 결과', summary.results || summary.keyFindings),
     createTextCard('한계점', summary.limitations),
     createCard('핵심 키워드', createKeywordList(summary.keywords || [])),
     createTextCard('한 문단 요약', summary.oneParagraphSummary),
@@ -105,9 +106,30 @@ function renderResults(analysis) {
 }
 
 function createTextCard(title, text) {
-  const paragraph = document.createElement('p');
-  paragraph.textContent = text || '확인할 수 없음';
-  return createCard(title, paragraph);
+  const wrapper = document.createElement('div');
+  wrapper.className = 'paragraph-stack';
+
+  for (const paragraphText of splitIntoParagraphs(text)) {
+    const paragraph = document.createElement('p');
+    paragraph.textContent = paragraphText;
+    wrapper.append(paragraph);
+  }
+
+  return createCard(title, wrapper);
+}
+
+function createListCard(title, value) {
+  const items = toBulletItems(value);
+  const list = document.createElement('ul');
+  list.className = 'bullet-list';
+
+  for (const item of items) {
+    const row = document.createElement('li');
+    row.textContent = item;
+    list.append(row);
+  }
+
+  return createCard(title, list);
 }
 
 function createCard(title, content) {
@@ -201,6 +223,37 @@ function createRecommendationList(recommendations) {
   }
 
   return list;
+}
+
+function cleanText(value) {
+  if (Array.isArray(value)) return value.map(cleanText).filter(Boolean).join(' ');
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function splitIntoParagraphs(value) {
+  const text = cleanText(value);
+  if (!text) return ['해당 내용을 명확히 찾지 못했습니다.'];
+  const sentences = text
+    .replace(/([.!?。])\s*(?=[A-Z가-힣0-9])/g, '$1|')
+    .split('|')
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+
+  if (sentences.length <= 2) return [text];
+
+  const paragraphs = [];
+  for (let index = 0; index < sentences.length && paragraphs.length < 4; index += 2) {
+    paragraphs.push(sentences.slice(index, index + 2).join(' '));
+  }
+  return paragraphs;
+}
+
+function toBulletItems(value) {
+  const rawItems = Array.isArray(value)
+    ? value
+    : cleanText(value).split(/\s*[•·]\s*|(?<=[.!?。])\s+(?=[A-Z가-힣0-9])/);
+  const items = rawItems.map(cleanText).filter(Boolean).slice(0, 6);
+  return items.length ? items : ['해당 내용을 명확히 찾지 못했습니다.'];
 }
 
 function isGitHubPagesWithoutApi() {
