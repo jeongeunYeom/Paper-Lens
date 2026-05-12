@@ -18,7 +18,10 @@ const SUMMARY_SCHEMA = {
       results: { type: 'array', items: { type: 'string' } },
       limitations: { type: 'string' },
       keywords: { type: 'array', minItems: 5, maxItems: 5, items: { type: 'string' } },
-      oneParagraphSummary: { type: 'string' }
+      oneParagraphSummary: { type: 'string' },
+      englishSummary: { type: 'string' },
+      koreanSummary: { type: 'string' },
+      sourceLanguage: { type: 'string', enum: ['en', 'ko', 'unknown'] }
     },
     required: [
       'title',
@@ -31,7 +34,10 @@ const SUMMARY_SCHEMA = {
       'results',
       'limitations',
       'keywords',
-      'oneParagraphSummary'
+      'oneParagraphSummary',
+      'englishSummary',
+      'koreanSummary',
+      'sourceLanguage'
     ]
   }
 };
@@ -40,6 +46,8 @@ const client = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPE
 const isMockSummaryEnabled = isEnabled(process.env.USE_MOCK_SUMMARY);
 const isRuleBasedFallbackEnabled = isEnabled(process.env.ALLOW_RULE_BASED_FALLBACK);
 const FALLBACK_MESSAGE = 'OpenAI API 없이 규칙 기반으로 추출한 요약입니다. 실제 AI 요약보다 정확도가 낮을 수 있습니다.';
+const TRANSLATION_CHUNK_SIZE = Number(process.env.TRANSLATION_CHUNK_SIZE || 6000);
+const MAX_TRANSLATION_INPUT_CHARS = Number(process.env.MAX_TRANSLATION_INPUT_CHARS || 30000);
 const STOPWORDS = new Set([
   'the', 'and', 'for', 'that', 'with', 'this', 'from', 'are', 'was', 'were', 'have', 'has', 'had', 'not', 'but',
   'paper', 'study', 'research', 'using', 'based', 'between', 'these', 'those', 'their', 'which', 'into', 'than',
@@ -78,7 +86,9 @@ export async function summarizePaper(text, pdfMetadata = {}) {
             '제공된 PDF 텍스트에 근거해서만 한국어 요약 보고서를 작성하세요.',
             '알 수 없는 항목은 추측하지 말고 "확인할 수 없음"이라고 쓰세요.',
             '핵심 키워드는 반드시 5개만 반환하세요.',
-            'results는 원문 복사가 아니라 3~5개의 짧은 한국어 bullet 문장 배열로 반환하세요.'
+            'results는 원문 복사가 아니라 3~5개의 짧은 한국어 bullet 문장 배열로 반환하세요.',
+            'koreanSummary는 한국어 한 문단 요약, englishSummary는 영어 한 문단 요약으로 작성하세요.',
+            'sourceLanguage는 원문 주요 언어가 영어면 en, 한국어면 ko, 판단이 어려우면 unknown으로 반환하세요.'
           ].join('\n')
         },
         {
@@ -99,6 +109,107 @@ export async function summarizePaper(text, pdfMetadata = {}) {
     console.error('OpenAI summarization failed:', error.message);
     throw createOpenAiError(`OpenAI API 요약에 실패했습니다: ${getOpenAiErrorMessage(error)}`, getOpenAiErrorStatus(error));
   }
+}
+
+export function detectPaperLanguage(text = '') {
+  const sample = cleanText(text).slice(0, 12000);
+  const koreanMatches = sample.match(/[가-힣]/g) || [];
+  const englishMatches = sample.match(/[A-Za-z]/g) || [];
+  if (englishMatches.length > koreanMatches.length * 3 && englishMatches.length > 300) return 'en';
+  if (koreanMatches.length > englishMatches.length * 0.15 && koreanMatches.length > 120) return 'ko';
+  return 'unknown';
+}
+
+export async function translatePaperToKorean(text, pdfMetadata = {}) {
+  const sourceLanguage = detectPaperLanguage(text);
+  if (sourceLanguage !== 'en') {
+    return {
+      sourceLanguage,
+      targetLanguage: 'ko',
+      status: 'not_needed',
+      title: '한국어 번역본',
+      body: '',
+      note: '원문이 영문 논문이 아닌 것으로 판단되어 전체 번역본은 생성하지 않았습니다.'
+    };
+  }
+
+  const sourceText = stripReferences(text).slice(0, MAX_TRANSLATION_INPUT_CHARS);
+  if (isMockSummaryEnabled) {
+    return {
+      sourceLanguage,
+      targetLanguage: 'ko',
+      status: 'translated',
+      title: `${pdfMetadata.Title || '영문 논문'} 한국어 번역본`,
+      body: `[테스트 모드 번역] ${summarizeText(sourceText, { maxSentences: 10, maxLength: 1800 })}`,
+      note: '테스트 모드에서는 OpenAI API를 호출하지 않아 축약된 번역 예시만 생성합니다.'
+    };
+  }
+
+  if (!client) {
+    throw createOpenAiError('영문 논문 전체 번역에는 OPENAI_API_KEY가 필요합니다.', 503);
+  }
+
+  try {
+    const chunks = chunkText(sourceText, TRANSLATION_CHUNK_SIZE);
+    const translatedChunks = [];
+    for (let index = 0; index < chunks.length; index += 1) {
+      const completion = await client.chat.completions.create({
+        model: process.env.OPENAI_TRANSLATION_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        temperature: 0.1,
+        messages: [
+          {
+            role: 'system',
+            content: [
+              '당신은 학술 논문 전문 번역가입니다.',
+              '영문 논문 본문을 자연스러운 한국어 학술 문체로 충실히 번역하세요.',
+              '수식, 변수명, 단위, 표/그림 캡션 표기는 가능한 한 보존하세요.',
+              '참고문헌 목록은 번역하지 않습니다.',
+              '설명이나 요약을 덧붙이지 말고 번역문만 반환하세요.'
+            ].join('\n')
+          },
+          { role: 'user', content: `번역할 본문 조각 ${index + 1}/${chunks.length}:\n\n${chunks[index]}` }
+        ]
+      });
+      translatedChunks.push(cleanText(completion.choices[0]?.message?.content || ''));
+    }
+
+    return {
+      sourceLanguage,
+      targetLanguage: 'ko',
+      status: 'translated',
+      title: `${pdfMetadata.Title || '영문 논문'} 한국어 번역본`,
+      body: translatedChunks.filter(Boolean).join('\n\n'),
+      note: '참고문헌 섹션은 제외했습니다. 현재 서버는 PDF 텍스트 추출 기반이므로 원본 figure 이미지를 동일하게 복제하지는 못하고, 텍스트와 캡션 번역을 중심으로 생성합니다.'
+    };
+  } catch (error) {
+    console.error('OpenAI translation failed:', error.message);
+    throw createOpenAiError(`OpenAI 번역에 실패했습니다: ${getOpenAiErrorMessage(error)}`, getOpenAiErrorStatus(error));
+  }
+}
+
+function stripReferences(text = '') {
+  const normalized = String(text || '');
+  const match = normalized.match(/(?:^|\n)\s*(references|bibliography|works cited|참고문헌)\s*\n/i);
+  return match?.index ? normalized.slice(0, match.index).trim() : normalized.trim();
+}
+
+function chunkText(text, size) {
+  const chunks = [];
+  const paragraphs = String(text || '').split(/\n{2,}/).map((paragraph) => paragraph.trim()).filter(Boolean);
+  let current = '';
+  for (const paragraph of paragraphs) {
+    if ((current + '\n\n' + paragraph).length > size && current) {
+      chunks.push(current);
+      current = paragraph;
+    } else {
+      current = current ? `${current}\n\n${paragraph}` : paragraph;
+    }
+  }
+  if (current) chunks.push(current);
+  if (!chunks.length && text) {
+    for (let index = 0; index < text.length; index += size) chunks.push(text.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function isEnabled(value) {
@@ -136,6 +247,8 @@ function buildPromptText(text, pdfMetadata = {}) {
     '알 수 없는 항목은 추측하지 말고 "확인할 수 없음"이라고 쓰세요.',
     '핵심 키워드는 반드시 5개만 반환하세요.',
     'results는 원문 복사가 아니라 3~5개의 짧은 한국어 bullet 문장 배열로 반환하세요.',
+    'koreanSummary는 한국어 한 문단 요약, englishSummary는 영어 한 문단 요약으로 작성하세요.',
+    'sourceLanguage는 원문 주요 언어가 영어면 en, 한국어면 ko, 판단이 어려우면 unknown으로 반환하세요.',
     `PDF 메타데이터: ${JSON.stringify(pdfMetadata)}`,
     `논문 텍스트:\n${String(text || '').slice(0, 70000)}`
   ].join('\n');
@@ -172,7 +285,10 @@ function createRuleBasedSummary(text, pdfMetadata = {}, reason = FALLBACK_MESSAG
     results: toBulletItems(results || conclusion, { maxItems: 5, maxLength: 170 }),
     limitations: withFallback(summarizeText(limitations, { maxSentences: 3, maxLength: 480 }), '한계점 섹션을 명확히 찾지 못했습니다. 원문에서 limitations 또는 discussion 섹션을 확인해 주세요.'),
     keywords,
-    oneParagraphSummary: `${reason} ${summarizeText(abstract || conclusion || normalized, { maxSentences: 4, maxLength: 620 })}`
+    oneParagraphSummary: `${reason} ${summarizeText(abstract || conclusion || normalized, { maxSentences: 4, maxLength: 620 })}`,
+    koreanSummary: `${reason} ${summarizeText(abstract || conclusion || normalized, { maxSentences: 4, maxLength: 620 })}`,
+    englishSummary: 'Rule-based English summary is unavailable. Please use OpenAI API summarization for a bilingual summary.',
+    sourceLanguage: detectPaperLanguage(normalized)
   };
 }
 
@@ -191,7 +307,10 @@ function createMockSummary(text, pdfMetadata = {}) {
     results: normalized ? [`추출 텍스트가 정상적으로 확인되었습니다: ${normalized.slice(0, 150)}`, '결과 화면과 PDF 다운로드 흐름을 테스트할 수 있습니다.'] : ['추출된 텍스트가 제한적입니다.'],
     limitations: '이 결과는 실제 AI 요약이 아니므로 논문 내용의 정확한 학술적 해석이나 최종 결과로 사용하면 안 됩니다.',
     keywords: ['테스트 모드', 'PDF 분석', '논문 요약', '업로드 검증', '보고서 생성'],
-    oneParagraphSummary: '현재 결과는 OpenAI API를 호출하지 않고 생성된 테스트용 요약입니다. 배포와 UI 흐름을 빠르게 검증한 뒤 실제 서비스에서는 USE_MOCK_SUMMARY를 false로 바꾸고 유효한 OPENAI_API_KEY를 설정하세요.'
+    oneParagraphSummary: '현재 결과는 OpenAI API를 호출하지 않고 생성된 테스트용 요약입니다. 배포와 UI 흐름을 빠르게 검증한 뒤 실제 서비스에서는 USE_MOCK_SUMMARY를 false로 바꾸고 유효한 OPENAI_API_KEY를 설정하세요.',
+    koreanSummary: '현재 결과는 OpenAI API를 호출하지 않고 생성된 테스트용 한국어 요약입니다.',
+    englishSummary: 'This is a mock English summary generated without calling the OpenAI API.',
+    sourceLanguage: detectPaperLanguage(normalized)
   };
 }
 

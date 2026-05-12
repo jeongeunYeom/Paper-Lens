@@ -5,15 +5,17 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import multer from 'multer';
 import { extractTextFromPdf } from '../services/pdfService.js';
-import { summarizePaper } from '../services/openaiService.js';
+import { summarizePaper, translatePaperToKorean } from '../services/openaiService.js';
 import { searchSimilarPapers } from '../services/paperSearchService.js';
 import { createSummaryReportPdf } from '../services/pdfReportService.js';
+import { createFigurePreservingTranslationPdf } from '../services/layoutTranslationService.js';
 
 const router = express.Router();
 const routeDir = path.dirname(fileURLToPath(import.meta.url));
 const uploadsDir = path.resolve(routeDir, '../uploads');
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const reportCache = new Map();
+const layoutTranslationCache = new Map();
 
 const upload = multer({
   dest: uploadsDir,
@@ -41,13 +43,17 @@ router.post('/analyze', upload.single('paper'), async (req, res, next) => {
     const extracted = await extractTextFromPdf(uploadedPath);
     const summaryResult = await summarizePaper(extracted.text, extracted.info);
     const { _tokenUsage: tokenUsage = null, ...summary } = summaryResult;
-    const recommendations = await searchSimilarPapers(summary);
+    const translation = await translatePaperToKorean(extracted.text, extracted.info);
     const reportId = crypto.randomUUID();
+    const layoutTranslation = await buildLayoutTranslationReport(uploadedPath, translation, reportId);
+    const recommendations = await searchSimilarPapers(summary);
     const analysis = {
       reportId,
       fileName: req.file.originalname,
       pageCount: extracted.pageCount,
       summary,
+      translation,
+      layoutTranslation,
       recommendations,
       tokenUsage
     };
@@ -87,6 +93,21 @@ router.post('/reports/pdf', async (req, res, next) => {
   }
 });
 
+router.get('/reports/:reportId.layout-translated.pdf', async (req, res, next) => {
+  try {
+    const report = layoutTranslationCache.get(req.params.reportId);
+    if (!report) {
+      const error = new Error('Figure 보존 번역 PDF를 찾을 수 없습니다. 다시 분석해 주세요.');
+      error.status = 404;
+      throw error;
+    }
+
+    sendPdfBuffer(res, report.buffer, report.fileName);
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/reports/:reportId.pdf', async (req, res, next) => {
   try {
     const analysis = reportCache.get(req.params.reportId);
@@ -103,6 +124,32 @@ router.get('/reports/:reportId.pdf', async (req, res, next) => {
   }
 });
 
+
+async function buildLayoutTranslationReport(sourcePdfPath, translation, reportId) {
+  if (!sourcePdfPath || translation?.status !== 'translated') return null;
+
+  try {
+    const buffer = await createFigurePreservingTranslationPdf(sourcePdfPath, translation, { reportId });
+    if (!buffer) return null;
+
+    const report = {
+      reportId,
+      status: 'ready',
+      downloadPath: `/api/reports/${reportId}.layout-translated.pdf`,
+      fileName: `${sanitizeFileName(translation.title || '한국어_번역본')}.pdf`
+    };
+    layoutTranslationCache.set(reportId, { ...report, buffer });
+    setTimeout(() => layoutTranslationCache.delete(reportId), 30 * 60 * 1000).unref();
+    return report;
+  } catch (error) {
+    console.warn('Figure-preserving translation PDF unavailable:', error.message);
+    return {
+      reportId,
+      status: 'unavailable',
+      message: error.message
+    };
+  }
+}
 
 function buildReportFileName(analysis = {}) {
   const title = analysis.summary?.title || path.parse(analysis.fileName || '').name || '논문';

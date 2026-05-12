@@ -13,7 +13,10 @@ export function normalizeSummary(summary = {}) {
     results: results.length ? results : [EMPTY_MESSAGE],
     limitations: summarizeText(summary.limitations, { maxSentences: 3, maxLength: 520 }),
     keywords,
-    oneParagraphSummary: summarizeText(summary.oneParagraphSummary || summary.summary || summary.abstract, { maxSentences: 4, maxLength: 760 }),
+    oneParagraphSummary: summarizeText(summary.oneParagraphSummary || summary.koreanSummary || summary.summary || summary.abstract, { maxSentences: 4, maxLength: 760 }),
+    koreanSummary: summarizeText(summary.koreanSummary || summary.oneParagraphSummary || summary.summary || summary.abstract, { maxSentences: 4, maxLength: 760 }),
+    englishSummary: summarizeText(summary.englishSummary, { maxSentences: 4, maxLength: 760 }),
+    sourceLanguage: normalizeLanguage(summary.sourceLanguage),
     abstract: summarizeText(summary.abstract, { maxSentences: 5, maxLength: 900 })
   };
 
@@ -100,4 +103,9 @@ function normalizeKeywords(keywords) {
     .filter((keyword, index, array) => array.indexOf(keyword) === index)
     .slice(0, 5);
   return cleaned.length ? cleaned : ['PDF 분석', '논문 요약', '연구 방법', '주요 결과', '한계점'];
+}
+
+function normalizeLanguage(language) {
+  const value = cleanText(language).toLowerCase();
+  return ['en', 'ko', 'unknown'].includes(value) ? value : 'unknown';
 }

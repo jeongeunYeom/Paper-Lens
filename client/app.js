@@ -55,7 +55,7 @@ async function analyzePaper(file) {
   setBusy(true, 'PDF 업로드 및 분석 요청을 준비하고 있습니다.');
 
   try {
-    statusMessage.textContent = '텍스트 추출, AI 요약, 유사 논문 검색을 진행하고 있습니다.';
+    statusMessage.textContent = '텍스트 추출, AI 요약, 영문 논문 번역, 유사 논문 검색을 진행하고 있습니다.';
     const response = await fetch(`${API_BASE_URL}/analyze`, { method: 'POST', body: formData });
     const payload = await response.json();
 
@@ -73,6 +73,26 @@ async function analyzePaper(file) {
   }
 }
 
+function renderLayoutTranslationAction(actions, analysis) {
+  if (!analysis.layoutTranslation) return;
+
+  if (analysis.layoutTranslation.status === 'ready') {
+    const link = document.createElement('a');
+    link.className = 'secondary-button';
+    link.href = `${API_BASE_URL}/reports/${analysis.reportId}.layout-translated.pdf`;
+    link.textContent = 'Figure 보존 번역 PDF';
+    actions.prepend(link);
+    return;
+  }
+
+  if (analysis.layoutTranslation.status === 'unavailable') {
+    const note = document.createElement('p');
+    note.className = 'muted action-note';
+    note.textContent = `Figure 보존 번역 PDF 생성 불가: ${analysis.layoutTranslation.message}`;
+    actions.append(note);
+  }
+}
+
 function renderResults(analysis) {
   const summary = analysis.summary || {};
   results.replaceChildren();
@@ -86,10 +106,11 @@ function renderResults(analysis) {
     event.preventDefault();
     downloadReportPdf(analysis, downloadLink);
   });
+  renderLayoutTranslationAction(header.querySelector('.actions'), analysis);
   header.querySelector('[data-field="resetButton"]').addEventListener('click', resetApp);
   results.append(header);
 
-  results.append(
+  const resultCards = [
     createCard('논문 기본 정보', createInfoList([
       ['제목', summary.title || '확인할 수 없음'],
       ['저자', summary.authors?.join(', ') || '확인할 수 없음'],
@@ -103,9 +124,19 @@ function renderResults(analysis) {
     createListCard('주요 결과', summary.results || summary.keyFindings),
     createTextCard('한계점', summary.limitations),
     createCard('핵심 키워드', createKeywordList(summary.keywords || [])),
+    createTextCard('요약본 (국문)', summary.koreanSummary || summary.oneParagraphSummary),
+    createTextCard('Summary (English)', summary.englishSummary),
     createTextCard('한 문단 요약', summary.oneParagraphSummary),
     createCard('유사 논문 추천', createRecommendationList(analysis.recommendations || []))
-  );
+  ];
+
+  if (analysis.translation?.status === 'translated') {
+    resultCards.splice(2, 0, createTranslationPreviewCard(analysis.translation));
+  } else if (analysis.translation?.sourceLanguage) {
+    resultCards.splice(2, 0, createTextCard('번역본', analysis.translation.note));
+  }
+
+  results.append(...resultCards);
 
   uploadCard.hidden = true;
   results.hidden = false;
@@ -154,6 +185,31 @@ async function downloadReportPdf(analysis, button) {
     button.textContent = originalText;
     button.removeAttribute('aria-busy');
   }
+}
+
+function createTranslationPreviewCard(translation) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'paragraph-stack';
+
+  const note = document.createElement('p');
+  note.className = 'muted';
+  note.textContent = translation.note || '영문 논문 본문을 참고문헌 제외 후 한국어로 번역했습니다.';
+  wrapper.append(note);
+
+  for (const paragraphText of splitIntoParagraphs(translation.body).slice(0, 3)) {
+    const paragraph = document.createElement('p');
+    paragraph.textContent = paragraphText;
+    wrapper.append(paragraph);
+  }
+
+  if (cleanText(translation.body).length > 1200) {
+    const more = document.createElement('p');
+    more.className = 'muted';
+    more.textContent = '전체 번역문은 PDF 다운로드 파일에서 확인하세요.';
+    wrapper.append(more);
+  }
+
+  return createCard('영문 원문 한국어 번역본', wrapper);
 }
 
 function buildReportFileName(analysis = {}) {
