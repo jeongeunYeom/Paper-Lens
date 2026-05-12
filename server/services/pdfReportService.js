@@ -35,7 +35,7 @@ export function createSummaryReportPdf(analysis) {
       if (buffer.length < 1500) {
         return reject(new Error('요약 보고서 PDF 생성에 실패했습니다. 생성된 파일이 비정상적으로 작습니다.'));
       }
-      console.log(`Generated analysis PDF: ${buffer.length} bytes, reportId=${analysis.reportId || 'unknown'}, translation=${analysis.translation?.status || 'none'}`);
+      console.log(`Generated summary PDF: ${buffer.length} bytes, reportId=${analysis.reportId || 'unknown'}`);
       return resolve(buffer);
     });
     doc.on('error', reject);
@@ -71,7 +71,6 @@ function renderReport(doc, analysis) {
 
   renderInfoCard(doc, summary);
   renderBilingualSummary(doc, summary);
-  renderTranslation(doc, analysis.translation);
   renderSection(doc, '1. 연구 배경', summary.background);
   renderSection(doc, '2. 연구 목적', summary.purpose);
   renderSection(doc, '3. 연구 방법', summary.method);
@@ -84,40 +83,6 @@ function renderReport(doc, analysis) {
 function renderBilingualSummary(doc, summary) {
   renderSection(doc, '요약본 (국문)', summary.koreanSummary || summary.oneParagraphSummary);
   renderSection(doc, 'Summary (English)', summary.englishSummary || 'English summary is unavailable.');
-}
-
-function renderTranslation(doc, translation) {
-  if (!translation || !['translated', 'partial'].includes(translation.status) || !translation.body) return;
-
-  const title = '영문 원문 한국어 번역본 (참고문헌 제외)';
-  const note = translation.note ? `번역 메모: ${translation.note}` : '';
-  const paragraphs = splitLongTextIntoParagraphs(translation.body);
-  renderSection(doc, title, note, { maxParagraphs: 2 });
-
-  for (const paragraph of paragraphs) {
-    const layout = getSectionLayout(doc);
-    const estimatedHeight = estimateSectionHeight(doc, '', [paragraph], { bullets: false, layout });
-    ensureSpace(doc, estimatedHeight);
-    renderParagraph(doc, paragraph, layout);
-  }
-  doc.moveDown(0.7);
-}
-
-function splitLongTextIntoParagraphs(value) {
-  const rawParagraphs = String(value || '')
-    .split(/\n{2,}/)
-    .map((paragraph) => paragraph.replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
-
-  const paragraphs = rawParagraphs.length ? rawParagraphs : [String(value || '').replace(/\s+/g, ' ').trim()].filter(Boolean);
-  return paragraphs.flatMap((paragraph) => {
-    if (paragraph.length <= 900) return [paragraph];
-    const chunks = [];
-    for (let index = 0; index < paragraph.length; index += 900) {
-      chunks.push(paragraph.slice(index, index + 900).trim());
-    }
-    return chunks;
-  });
 }
 
 function renderInfoCard(doc, summary) {

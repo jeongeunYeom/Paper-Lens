@@ -2,26 +2,30 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import PDFDocument from 'pdfkit';
 
 const execFileAsync = promisify(execFile);
+const serviceDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(serviceDir, '../..');
 const DEFAULT_RENDER_DPI = Number(process.env.LAYOUT_TRANSLATION_RENDER_DPI || 180);
 const POPPLER_TIMEOUT_MS = Number(process.env.LAYOUT_TRANSLATION_POPPLER_TIMEOUT_MS || 180000);
 const RENDER_DPI_CANDIDATES = [...new Set([DEFAULT_RENDER_DPI, 140, 110, 90].filter((dpi) => Number.isFinite(dpi) && dpi > 0))];
 const EMPTY_TRANSLATION_MESSAGE = '번역할 본문을 찾지 못했습니다.';
 const FONT_CANDIDATES = [
   process.env.REPORT_FONT_PATH,
-  path.resolve('fonts/NotoSansKR-Regular.otf'),
-  path.resolve('fonts/NotoSansKR-Regular.ttf'),
-  path.resolve('fonts/Pretendard-Regular.otf'),
-  path.resolve('node_modules/@fontsource/noto-sans-kr/files/noto-sans-kr-korean-400-normal.woff'),
-  path.resolve('node_modules/@fontsource/noto-sans-kr/files/noto-sans-kr-400-normal.woff'),
+  path.join(repoRoot, 'fonts/NotoSansKR-Regular.otf'),
+  path.join(repoRoot, 'fonts/NotoSansKR-Regular.ttf'),
+  path.join(repoRoot, 'fonts/Pretendard-Regular.otf'),
+  path.join(repoRoot, 'node_modules/@fontsource/noto-sans-kr/files/noto-sans-kr-korean-400-normal.woff'),
+  path.join(repoRoot, 'node_modules/@fontsource/noto-sans-kr/files/noto-sans-kr-korean-400-normal.woff2'),
+  path.join(repoRoot, 'node_modules/@fontsource/noto-sans-kr/files/noto-sans-kr-400-normal.woff'),
+  path.join(repoRoot, 'node_modules/@fontsource/noto-sans-kr/files/noto-sans-kr-400-normal.woff2'),
   '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
   '/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf',
-  '/usr/share/fonts/truetype/nanum/NanumGothic.ttf',
-  '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+  '/usr/share/fonts/truetype/nanum/NanumGothic.ttf'
 ].filter(Boolean);
 
 export async function createFigurePreservingTranslationPdf(sourcePdfPath, translation, { reportId = 'unknown' } = {}) {
@@ -268,11 +272,11 @@ async function renderTranslatedOverlayPdf({ layout, pageImages, translation, rep
       const blocks = page.blocks.filter((block) => shouldTranslateBlock(block, pageIndex, layout.referenceStart));
       for (const block of blocks) {
         const translatedText = paragraphs[paragraphIndex] || '';
-        if (!translatedText) continue;
-
         coverBlock(doc, block);
-        drawTranslatedBlock(doc, block, translatedText);
-        paragraphIndex += 1;
+        if (translatedText) {
+          drawTranslatedBlock(doc, block, translatedText);
+          paragraphIndex += 1;
+        }
       }
 
       if (layout.referenceStart?.pageIndex === pageIndex) {
@@ -365,11 +369,16 @@ function registerFont(doc) {
     if (!fontPath || !fsSync.existsSync(fontPath)) continue;
     try {
       doc.font(fontPath);
+      console.log(`Using layout translation font: ${fontPath}`);
       return;
-    } catch (_) {
-      // Try next font candidate.
+    } catch (error) {
+      console.warn(`Skipping unsupported layout translation font ${fontPath}: ${error.message}`);
     }
   }
+
+  const error = new Error('Figure 보존 번역 PDF에 사용할 한글 폰트를 찾지 못했습니다. REPORT_FONT_PATH 또는 fonts/NotoSansKR-Regular.otf를 설정해 주세요.');
+  error.status = 501;
+  throw error;
 }
 
 function addPageNumbers(doc) {
