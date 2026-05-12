@@ -34,7 +34,7 @@ export function createSummaryReportPdf(analysis) {
       if (buffer.length < 1500) {
         return reject(new Error('요약 보고서 PDF 생성에 실패했습니다. 생성된 파일이 비정상적으로 작습니다.'));
       }
-      console.log(`Generated summary PDF: ${buffer.length} bytes, sections=8, reportId=${analysis.reportId || 'unknown'}`);
+      console.log(`Generated summary PDF: ${buffer.length} bytes, sections=7, reportId=${analysis.reportId || 'unknown'}`);
       return resolve(buffer);
     });
     doc.on('error', reject);
@@ -69,7 +69,6 @@ function renderReport(doc, analysis) {
   doc.moveDown(1.1);
 
   renderInfoCard(doc, summary);
-  renderTokenUsageCard(doc, analysis.tokenUsage);
   renderSection(doc, '1. 연구 배경', summary.background);
   renderSection(doc, '2. 연구 목적', summary.purpose);
   renderSection(doc, '3. 연구 방법', summary.method);
@@ -77,82 +76,42 @@ function renderReport(doc, analysis) {
   renderSection(doc, '5. 한계점', summary.limitations);
   renderSection(doc, '6. 핵심 키워드', summary.keywords, { bullets: true });
   renderSection(doc, '7. 한 문단 요약', summary.oneParagraphSummary);
-  renderRecommendations(doc, analysis.recommendations || []);
 }
 
 function renderInfoCard(doc, summary) {
   const x = doc.page.margins.left;
   const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-  const startY = doc.y;
+  const labelX = x + 18;
+  const valueX = x + 112;
+  const labelWidth = 76;
+  const valueWidth = width - 134;
   const rows = [
     ['논문 제목', summary.title],
     ['저자', summary.authors.join(', ')],
     ['출판연도', summary.year],
     ['핵심 키워드', summary.keywords.join(', ')]
-  ];
-  const height = 112;
+  ].map(([label, value]) => {
+    const text = value || EMPTY_MESSAGE;
+    doc.fontSize(9);
+    const labelHeight = doc.heightOfString(label, { width: labelWidth });
+    doc.fontSize(10);
+    const valueHeight = doc.heightOfString(text, { width: valueWidth, lineGap: 2 });
+    return { label, text, height: Math.max(18, labelHeight, valueHeight) + 8 };
+  });
+  const height = 50 + rows.reduce((total, row) => total + row.height, 0);
 
   ensureSpace(doc, height + 18);
+  const startY = doc.y;
   doc.roundedRect(x, startY, width, height, 14).fill('#f8fafc').stroke('#dbe4f0');
   doc.fillColor('#1e3a8a').fontSize(13).text('논문 기본 정보', x + 18, startY + 14);
 
-  let y = startY + 36;
-  rows.forEach(([label, value]) => {
-    doc.fillColor('#64748b').fontSize(9).text(label, x + 18, y, { width: 70 });
-    doc.fillColor('#111827').fontSize(10).text(value || EMPTY_MESSAGE, x + 92, y, { width: width - 112, lineGap: 2 });
-    y += 18;
+  let y = startY + 40;
+  rows.forEach(({ label, text, height: rowHeight }) => {
+    doc.fillColor('#64748b').fontSize(9).text(label, labelX, y, { width: labelWidth });
+    doc.fillColor('#111827').fontSize(10).text(text, valueX, y, { width: valueWidth, lineGap: 2 });
+    y += rowHeight;
   });
   doc.y = startY + height + 18;
-}
-
-function renderTokenUsageCard(doc, tokenUsage) {
-  if (!tokenUsage) return;
-
-  const rows = (tokenUsage.usedOpenAi || tokenUsage.assumedOpenAi)
-    ? [
-      ['요약 방식', tokenUsage.summaryMethod || 'OpenAI API 요약'],
-      ['사용 모델명', tokenUsage.model || 'model unknown'],
-      ['입력/출력 토큰', `${formatNumber(tokenUsage.promptTokens)} / ${formatNumber(tokenUsage.completionTokens)}`],
-      ['총 토큰', formatNumber(tokenUsage.totalTokens)],
-      ['예상 비용', formatCurrency(tokenUsage.estimatedCostUsd, tokenUsage.currency)],
-      ['단가 기준', `입력 $${tokenUsage.inputPricePerMillion}/1M · 출력 $${tokenUsage.outputPricePerMillion}/1M`]
-    ]
-    : [
-      ['요약 방식', tokenUsage.source === 'mock' ? '테스트 모드' : '규칙 기반 요약'],
-      ['총 토큰', '0'],
-      ['예상 비용', '$0.000000'],
-      ['비고', tokenUsage.note || 'OpenAI API를 사용하지 않았습니다.']
-    ];
-
-  renderCompactCard(doc, 'OpenAI 토큰 사용량', rows);
-}
-
-function renderCompactCard(doc, title, rows) {
-  const x = doc.page.margins.left;
-  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-  const height = 42 + rows.length * 15;
-  ensureSpace(doc, height + 16);
-  const startY = doc.y;
-
-  doc.roundedRect(x, startY, width, height, 12).fill('#fbfdff').stroke('#dbe4f0');
-  doc.fillColor('#1e3a8a').fontSize(12).text(title, x + 18, startY + 12);
-  let y = startY + 32;
-  rows.forEach(([label, value]) => {
-    doc.fillColor('#64748b').fontSize(8.8).text(label, x + 18, y, { width: 86 });
-    doc.fillColor('#111827').fontSize(9.3).text(value || EMPTY_MESSAGE, x + 106, y, { width: width - 126, lineGap: 1 });
-    y += 15;
-  });
-  doc.y = startY + height + 16;
-}
-
-function formatNumber(value) {
-  return Number(value || 0).toLocaleString('ko-KR');
-}
-
-function formatCurrency(value, currency = 'USD') {
-  const amount = Number(value || 0);
-  if (currency !== 'USD') return `${amount.toFixed(6)} ${currency}`;
-  return `$${amount.toFixed(6)}`;
 }
 
 function renderSection(doc, title, content, { bullets = false } = {}) {
@@ -189,32 +148,6 @@ function renderBullet(doc, text) {
     lineGap: 4
   });
   doc.moveDown(0.35);
-}
-
-function renderRecommendations(doc, recommendations = []) {
-  renderSectionTitle(doc, '8. 유사 논문 추천');
-  if (!recommendations.length) {
-    doc.fillColor('#64748b').fontSize(10.5).text('추천 논문을 찾지 못했습니다.', { lineGap: 5 });
-    return;
-  }
-
-  recommendations.forEach((paper, index) => {
-    ensureSpace(doc, 90);
-    const authors = paper.authors?.length ? paper.authors.join(', ') : '저자 정보 없음';
-    const link = paper.doi ? `DOI: ${paper.doi}` : `링크: ${paper.link || '정보 없음'}`;
-    doc.fillColor('#0f172a').fontSize(11.5).text(`${index + 1}. ${paper.title || '제목 없음'}`, { lineGap: 3 });
-    doc.fillColor('#475569').fontSize(9.5).text(`저자: ${authors}`);
-    doc.text(`연도: ${paper.year || '연도 정보 없음'} · ${link}`);
-    doc.fillColor('#1f2937').fontSize(10).text(`추천 이유: ${paper.reason || '검색 결과 기반 추천입니다.'}`, { lineGap: 4 });
-    doc.moveDown(0.7);
-  });
-}
-
-function renderSectionTitle(doc, title) {
-  ensureSpace(doc, 64);
-  doc.moveDown(0.3);
-  doc.fillColor('#12357c').fontSize(14).text(title);
-  doc.moveDown(0.45);
 }
 
 function ensureSpace(doc, neededHeight) {
