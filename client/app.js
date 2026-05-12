@@ -80,7 +80,12 @@ function renderResults(analysis) {
   const header = resultsTemplate.content.cloneNode(true);
   header.querySelector('[data-field="title"]').textContent = summary.title || '확인할 수 없음';
   header.querySelector('[data-field="fileMeta"]').textContent = `파일: ${analysis.fileName} · ${analysis.pageCount || 0}쪽`;
-  header.querySelector('[data-field="downloadLink"]').href = `${API_BASE_URL}/reports/${analysis.reportId}.pdf`;
+  const downloadLink = header.querySelector('[data-field="downloadLink"]');
+  downloadLink.href = `${API_BASE_URL}/reports/${analysis.reportId}.pdf`;
+  downloadLink.addEventListener('click', (event) => {
+    event.preventDefault();
+    downloadReportPdf(analysis, downloadLink);
+  });
   header.querySelector('[data-field="resetButton"]').addEventListener('click', resetApp);
   results.append(header);
 
@@ -106,12 +111,58 @@ function renderResults(analysis) {
   results.hidden = false;
 }
 
+async function downloadReportPdf(analysis, button) {
+  clearMessages();
+  const originalText = button.textContent;
+  button.textContent = 'PDF 생성 중...';
+  button.setAttribute('aria-busy', 'true');
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/reports/pdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(analysis)
+    });
+
+    if (!response.ok) {
+      let message = '요약 PDF를 생성하지 못했습니다.';
+      try {
+        const payload = await response.json();
+        message = payload.message || message;
+      } catch (_) {
+        message = await response.text() || message;
+      }
+      throw new Error(message);
+    }
+
+    const blob = await response.blob();
+    if (!blob || blob.size < 1500) {
+      throw new Error('생성된 PDF 파일이 비정상적으로 작습니다. 다시 분석해 주세요.');
+    }
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `paper-lens-${analysis.reportId || 'summary'}.pdf`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    button.textContent = originalText;
+    button.removeAttribute('aria-busy');
+  }
+}
+
 function createTokenUsageCard(tokenUsage) {
   if (!tokenUsage) return createTextCard('OpenAI 토큰 사용량', '토큰 사용량 정보를 확인할 수 없습니다.');
 
-  const rows = tokenUsage.usedOpenAi
+  const rows = (tokenUsage.usedOpenAi || tokenUsage.assumedOpenAi)
     ? [
-      ['요약 방식', `OpenAI API (${tokenUsage.model || 'model unknown'})`],
+      ['요약 방식', tokenUsage.summaryMethod || 'OpenAI API 요약'],
+      ['사용 모델명', tokenUsage.model || 'model unknown'],
       ['입력 토큰', formatNumber(tokenUsage.promptTokens)],
       ['출력 토큰', formatNumber(tokenUsage.completionTokens)],
       ['총 토큰', formatNumber(tokenUsage.totalTokens)],

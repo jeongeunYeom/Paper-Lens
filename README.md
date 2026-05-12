@@ -86,7 +86,7 @@ OpenAI API를 사용한 요약은 응답의 `usage` 값을 읽어 입력 토큰,
 (prompt_tokens * OPENAI_INPUT_PRICE_PER_1M_TOKENS + completion_tokens * OPENAI_OUTPUT_PRICE_PER_1M_TOKENS) / 1,000,000
 ```
 
-기본 단가는 `gpt-4o-mini` 기준 입력 `$0.15 / 1M tokens`, 출력 `$0.60 / 1M tokens`이며, 실제 청구액은 OpenAI 대시보드와 최신 가격 정책을 기준으로 확인하세요. 다른 모델을 쓰거나 가격이 바뀌면 Render 환경변수에서 `OPENAI_INPUT_PRICE_PER_1M_TOKENS`, `OPENAI_OUTPUT_PRICE_PER_1M_TOKENS`를 조정하면 됩니다. OpenAI를 쓰지 않는 규칙 기반/mock 요약은 토큰 비용이 `$0`으로 표시됩니다.
+기본 단가는 `gpt-4o-mini` 기준 입력 `$0.15 / 1M tokens`, 출력 `$0.60 / 1M tokens`이며, 실제 청구액은 OpenAI 대시보드와 최신 가격 정책을 기준으로 확인하세요. 다른 모델을 쓰거나 가격이 바뀌면 Render 환경변수에서 `OPENAI_INPUT_PRICE_PER_1M_TOKENS`, `OPENAI_OUTPUT_PRICE_PER_1M_TOKENS`를 조정하면 됩니다. OpenAI를 실제로 호출하지 않는 규칙 기반/mock 요약도 같은 입력을 OpenAI API로 처리한다고 가정한 추정 토큰과 예상 비용을 표시합니다.
 
 ## OpenAI API 없이 실행하기
 
@@ -107,7 +107,7 @@ USE_MOCK_SUMMARY=true
 ## 보고서 UI/PDF 출력 개선 사항
 
 - 화면 결과 카드는 문장 단위 문단 분리와 bullet 목록을 사용해 보고서처럼 읽기 쉽게 표시합니다.
-- 요약 PDF는 `Paper Lens 논문 분석 보고서` 제목, 기본 정보 카드, 1~7번 본문 섹션, 유사 논문 추천 카드 순서로 생성됩니다.
+- 요약 PDF는 `Paper Lens 논문 분석 보고서` 제목, 기본 정보 카드, OpenAI 토큰 사용량 카드, 1~8번 본문 섹션, 유사 논문 추천 카드 순서로 생성됩니다. 다운로드는 현재 화면의 분석 결과를 `POST /api/reports/pdf`로 전달해 생성하므로 서버 재시작이나 캐시 만료로 빈 PDF가 내려오는 문제를 줄였습니다.
 - PDF 한글 출력은 `REPORT_FONT_PATH`, `fonts/NotoSansKR-Regular.otf`, `fonts/NotoSansKR-Regular.ttf`, `fonts/Pretendard-Regular.otf`, `@fontsource/noto-sans-kr`, 시스템 Noto/Nanum 폰트 순서로 찾고, 폰트가 없으면 기본 폰트로 fallback합니다.
 - OpenAI API가 없거나 실패해도 규칙 기반 fallback이 긴 원문을 그대로 붙이지 않고 섹션·문장 단위로 최대 길이를 제한해 표시합니다.
 
@@ -119,6 +119,7 @@ client/styles.css
 server/services/openaiService.js
 server/services/summaryFormatService.js
 server/services/pdfReportService.js
+server/services/tokenUsageService.js
 fonts/README.md
 ```
 

@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { cleanText, normalizeSummary, summarizeText, toBulletItems } from './summaryFormatService.js';
+import { buildAssumedOpenAiUsage, buildTokenUsage } from './tokenUsageService.js';
 
 const SUMMARY_SCHEMA = {
   name: 'paper_summary',
@@ -43,27 +44,21 @@ const STOPWORDS = new Set([
   'paper', 'study', 'research', 'using', 'based', 'between', 'these', 'those', 'their', 'which', 'into', 'than',
   '논문', '연구', '결과', '방법', '분석', '대한', '통해', '위한', '있다', '있는', '한다', '에서', '으로', '그리고'
 ]);
-const DEFAULT_TOKEN_PRICES_PER_1M = {
-  'gpt-4o-mini': { input: 0.15, output: 0.60 },
-  'gpt-4o-mini-2024-07-18': { input: 0.15, output: 0.60 },
-  'gpt-4o': { input: 2.50, output: 10.00 },
-  'gpt-4.1': { input: 2.00, output: 8.00 },
-  'gpt-4.1-mini': { input: 0.40, output: 1.60 },
-  'gpt-4.1-nano': { input: 0.10, output: 0.40 }
-};
-
 // OpenAI 키가 있으면 AI 요약을 사용하고, 없거나 실패하면 규칙 기반 요약으로 앱 흐름을 계속 진행합니다.
 export async function summarizePaper(text, pdfMetadata = {}) {
+  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+
   if (isMockSummaryEnabled) {
-    return attachTokenUsage(normalizeSummary(createMockSummary(text, pdfMetadata)), createNonOpenAiUsage('mock'));
+    const summary = normalizeSummary(createMockSummary(text, pdfMetadata));
+    return attachAssumedUsage(summary, { source: 'mock', text, pdfMetadata, model });
   }
 
   if (!client) {
-    return attachTokenUsage(normalizeSummary(createRuleBasedSummary(text, pdfMetadata, 'OPENAI_API_KEY가 없어 규칙 기반 요약을 사용했습니다.')), createNonOpenAiUsage('rule-based'));
+    const summary = normalizeSummary(createRuleBasedSummary(text, pdfMetadata, 'OPENAI_API_KEY가 없어 규칙 기반 요약을 사용했습니다.'));
+    return attachAssumedUsage(summary, { source: 'rule-based', text, pdfMetadata, model });
   }
 
   try {
-    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
     const truncatedText = text.slice(0, 70000);
 
     const completion = await client.chat.completions.create({
@@ -91,7 +86,8 @@ export async function summarizePaper(text, pdfMetadata = {}) {
     return attachTokenUsage(normalizeSummary(JSON.parse(completion.choices[0].message.content)), buildTokenUsage(completion.usage, model));
   } catch (error) {
     console.warn('OpenAI summarization failed; falling back to rule-based summary:', error.message);
-    return attachTokenUsage(normalizeSummary(createRuleBasedSummary(text, pdfMetadata, `OpenAI API 호출 실패(${error.status || error.code || 'unknown'})로 규칙 기반 요약을 사용했습니다.`)), createNonOpenAiUsage('fallback', error));
+    const summary = normalizeSummary(createRuleBasedSummary(text, pdfMetadata, `OpenAI API 호출 실패(${error.status || error.code || 'unknown'})로 규칙 기반 요약을 사용했습니다.`));
+    return attachAssumedUsage(summary, { source: 'fallback', text, pdfMetadata, model, error });
   }
 }
 
@@ -99,51 +95,27 @@ function attachTokenUsage(summary, tokenUsage) {
   return { ...summary, _tokenUsage: tokenUsage };
 }
 
-function createNonOpenAiUsage(source, error = null) {
-  return {
+
+function buildPromptText(text, pdfMetadata = {}) {
+  return [
+    '당신은 학술 논문 분석 도우미입니다.',
+    '제공된 PDF 텍스트에 근거해서만 한국어 요약 보고서를 작성하세요.',
+    '알 수 없는 항목은 추측하지 말고 "확인할 수 없음"이라고 쓰세요.',
+    '핵심 키워드는 반드시 5개만 반환하세요.',
+    'results는 원문 복사가 아니라 3~5개의 짧은 한국어 bullet 문장 배열로 반환하세요.',
+    `PDF 메타데이터: ${JSON.stringify(pdfMetadata)}`,
+    `논문 텍스트:\n${String(text || '').slice(0, 70000)}`
+  ].join('\n');
+}
+
+function attachAssumedUsage(summary, { source, text, pdfMetadata, model, error = null }) {
+  return attachTokenUsage(summary, buildAssumedOpenAiUsage({
     source,
-    usedOpenAi: false,
-    promptTokens: 0,
-    completionTokens: 0,
-    totalTokens: 0,
-    estimatedCostUsd: 0,
-    currency: 'USD',
-    note: error ? `OpenAI 미사용: ${error.message}` : 'OpenAI API를 사용하지 않아 토큰 비용이 발생하지 않았습니다.'
-  };
-}
-
-function buildTokenUsage(usage = {}, model) {
-  const promptTokens = usage?.prompt_tokens ?? usage?.input_tokens ?? 0;
-  const completionTokens = usage?.completion_tokens ?? usage?.output_tokens ?? 0;
-  const totalTokens = usage?.total_tokens ?? promptTokens + completionTokens;
-  const cachedPromptTokens = usage?.prompt_tokens_details?.cached_tokens ?? usage?.input_tokens_details?.cached_tokens ?? 0;
-  const prices = getTokenPrices(model);
-  const estimatedCostUsd = ((promptTokens * prices.input) + (completionTokens * prices.output)) / 1_000_000;
-
-  return {
-    source: 'openai',
-    usedOpenAi: true,
+    inputText: buildPromptText(text, pdfMetadata),
+    outputText: JSON.stringify(summary),
     model,
-    promptTokens,
-    completionTokens,
-    totalTokens,
-    cachedPromptTokens,
-    inputPricePerMillion: prices.input,
-    outputPricePerMillion: prices.output,
-    estimatedCostUsd: Number(estimatedCostUsd.toFixed(8)),
-    currency: 'USD',
-    note: '표시 비용은 텍스트 토큰 단가 기준 추정치입니다. 실제 청구액은 OpenAI 대시보드와 과금 정책을 확인하세요.'
-  };
-}
-
-function getTokenPrices(model) {
-  const inputOverride = Number(process.env.OPENAI_INPUT_PRICE_PER_1M_TOKENS);
-  const outputOverride = Number(process.env.OPENAI_OUTPUT_PRICE_PER_1M_TOKENS);
-  if (Number.isFinite(inputOverride) && Number.isFinite(outputOverride) && inputOverride >= 0 && outputOverride >= 0) {
-    return { input: inputOverride, output: outputOverride };
-  }
-
-  return DEFAULT_TOKEN_PRICES_PER_1M[model] || DEFAULT_TOKEN_PRICES_PER_1M['gpt-4o-mini'];
+    error
+  }));
 }
 
 function createRuleBasedSummary(text, pdfMetadata = {}, reason = FALLBACK_MESSAGE) {

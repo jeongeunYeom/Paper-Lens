@@ -65,6 +65,28 @@ router.post('/analyze', upload.single('paper'), async (req, res, next) => {
   }
 });
 
+
+router.post('/reports/pdf', async (req, res, next) => {
+  try {
+    const analysis = req.body;
+    if (!analysis?.summary) {
+      const error = new Error('요약 보고서를 생성할 분석 결과가 없습니다. PDF를 다시 분석해 주세요.');
+      error.status = 400;
+      throw error;
+    }
+
+    const pdfBuffer = await createSummaryReportPdf({
+      ...analysis,
+      reportId: analysis.reportId || crypto.randomUUID(),
+      recommendations: analysis.recommendations || [],
+      tokenUsage: analysis.tokenUsage || null
+    });
+    sendPdfBuffer(res, pdfBuffer, analysis.reportId || 'download');
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/reports/:reportId.pdf', async (req, res, next) => {
   try {
     const analysis = reportCache.get(req.params.reportId);
@@ -75,13 +97,24 @@ router.get('/reports/:reportId.pdf', async (req, res, next) => {
     }
 
     const pdfBuffer = await createSummaryReportPdf(analysis);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="paper-lens-${analysis.reportId}.pdf"`);
-    res.send(pdfBuffer);
+    sendPdfBuffer(res, pdfBuffer, analysis.reportId);
   } catch (error) {
     next(error);
   }
 });
+
+
+function sendPdfBuffer(res, pdfBuffer, reportId) {
+  if (!Buffer.isBuffer(pdfBuffer) || pdfBuffer.length < 1500) {
+    const error = new Error('요약 보고서 PDF 생성에 실패했습니다. 파일 크기가 비정상적으로 작습니다.');
+    error.status = 500;
+    throw error;
+  }
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="paper-lens-${reportId}.pdf"`);
+  res.setHeader('Content-Length', String(pdfBuffer.length));
+  res.send(pdfBuffer);
+}
 
 router.use((err, _req, _res, next) => {
   if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
