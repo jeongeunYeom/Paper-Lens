@@ -17,9 +17,20 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.static(clientDir));
 
 app.get('/api/health', (_req, res) => {
-  const mockSummaryEnabled = ['true', '1', 'yes', 'on'].includes(String(process.env.USE_MOCK_SUMMARY || '').trim().toLowerCase());
-  res.json({ ok: true, service: 'paper-lens-api', mockSummaryEnabled });
+  const mockSummaryEnabled = isEnabled(process.env.USE_MOCK_SUMMARY);
+  const ruleBasedFallbackEnabled = isEnabled(process.env.ALLOW_RULE_BASED_FALLBACK);
+  res.json({
+    ok: true,
+    service: 'paper-lens-api',
+    openAiConfigured: Boolean(process.env.OPENAI_API_KEY),
+    mockSummaryEnabled,
+    ruleBasedFallbackEnabled
+  });
 });
+
+function isEnabled(value) {
+  return ['true', '1', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
 
 app.use('/api', analyzeRouter);
 

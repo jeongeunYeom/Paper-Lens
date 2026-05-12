@@ -37,14 +37,15 @@ const SUMMARY_SCHEMA = {
 };
 
 const client = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
-const isMockSummaryEnabled = ['true', '1', 'yes', 'on'].includes(String(process.env.USE_MOCK_SUMMARY || '').trim().toLowerCase());
+const isMockSummaryEnabled = isEnabled(process.env.USE_MOCK_SUMMARY);
+const isRuleBasedFallbackEnabled = isEnabled(process.env.ALLOW_RULE_BASED_FALLBACK);
 const FALLBACK_MESSAGE = 'OpenAI API 없이 규칙 기반으로 추출한 요약입니다. 실제 AI 요약보다 정확도가 낮을 수 있습니다.';
 const STOPWORDS = new Set([
   'the', 'and', 'for', 'that', 'with', 'this', 'from', 'are', 'was', 'were', 'have', 'has', 'had', 'not', 'but',
   'paper', 'study', 'research', 'using', 'based', 'between', 'these', 'those', 'their', 'which', 'into', 'than',
   '논문', '연구', '결과', '방법', '분석', '대한', '통해', '위한', '있다', '있는', '한다', '에서', '으로', '그리고'
 ]);
-// OpenAI 키가 있으면 AI 요약을 사용하고, 없거나 실패하면 규칙 기반 요약으로 앱 흐름을 계속 진행합니다.
+// 기본 동작은 실제 OpenAI API 요약입니다. mock/fallback은 명시적으로 켠 경우에만 사용합니다.
 export async function summarizePaper(text, pdfMetadata = {}) {
   const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
@@ -54,8 +55,12 @@ export async function summarizePaper(text, pdfMetadata = {}) {
   }
 
   if (!client) {
-    const summary = normalizeSummary(createRuleBasedSummary(text, pdfMetadata, 'OPENAI_API_KEY가 없어 규칙 기반 요약을 사용했습니다.'));
-    return attachAssumedUsage(summary, { source: 'rule-based', text, pdfMetadata, model });
+    if (isRuleBasedFallbackEnabled) {
+      const summary = normalizeSummary(createRuleBasedSummary(text, pdfMetadata, 'OPENAI_API_KEY가 없어 규칙 기반 요약을 사용했습니다.'));
+      return attachAssumedUsage(summary, { source: 'rule-based', text, pdfMetadata, model });
+    }
+
+    throw createOpenAiError('OPENAI_API_KEY가 설정되어 있지 않습니다. OpenAI API 크레딧을 사용하려면 서버 환경변수에 유효한 API 키를 설정해 주세요.', 503);
   }
 
   try {
@@ -85,10 +90,38 @@ export async function summarizePaper(text, pdfMetadata = {}) {
 
     return attachTokenUsage(normalizeSummary(JSON.parse(completion.choices[0].message.content)), buildTokenUsage(completion.usage, model));
   } catch (error) {
-    console.warn('OpenAI summarization failed; falling back to rule-based summary:', error.message);
-    const summary = normalizeSummary(createRuleBasedSummary(text, pdfMetadata, `OpenAI API 호출 실패(${error.status || error.code || 'unknown'})로 규칙 기반 요약을 사용했습니다.`));
-    return attachAssumedUsage(summary, { source: 'fallback', text, pdfMetadata, model, error });
+    if (isRuleBasedFallbackEnabled) {
+      console.warn('OpenAI summarization failed; falling back to rule-based summary:', error.message);
+      const summary = normalizeSummary(createRuleBasedSummary(text, pdfMetadata, `OpenAI API 호출 실패(${error.status || error.code || 'unknown'})로 규칙 기반 요약을 사용했습니다.`));
+      return attachAssumedUsage(summary, { source: 'fallback', text, pdfMetadata, model, error });
+    }
+
+    console.error('OpenAI summarization failed:', error.message);
+    throw createOpenAiError(`OpenAI API 요약에 실패했습니다: ${getOpenAiErrorMessage(error)}`, getOpenAiErrorStatus(error));
   }
+}
+
+function isEnabled(value) {
+  return ['true', '1', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
+function createOpenAiError(message, status = 502) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+function getOpenAiErrorStatus(error) {
+  if (Number.isInteger(error?.status) && error.status >= 400 && error.status < 500) {
+    return error.status;
+  }
+  return 502;
+}
+
+function getOpenAiErrorMessage(error) {
+  if (error?.status === 401) return 'API 키가 올바르지 않거나 권한이 없습니다.';
+  if (error?.status === 429) return '요청 한도 또는 결제/크레딧 상태를 확인해 주세요.';
+  return error?.message || '알 수 없는 오류';
 }
 
 function attachTokenUsage(summary, tokenUsage) {
