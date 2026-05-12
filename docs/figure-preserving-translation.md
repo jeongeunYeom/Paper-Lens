@@ -7,11 +7,8 @@ Paper Lens now includes a first-pass layout-preserving translation pipeline for 
 - Uses Poppler tools (`pdftoppm` and `pdftotext`) when they are available on the server, with sanitized error messages if a PDF cannot be rasterized.
 - Renders each original PDF page to a high-resolution PNG background and retries with lower DPI values if the first rasterization attempt fails.
 - Extracts text word bounding boxes with `pdftotext -bbox-layout`.
-<<<<<<< codex/create-web-app-for-pdf-analysis-and-summary-ltpx8o
 - Groups words into lines/blocks, paints white rectangles over detected text lines, and flows Korean translation into sufficiently large body text blocks with a consistent embedded Korean font size.
-=======
-- Groups words into lines/blocks, paints white rectangles over detected text blocks, and draws Korean translation text into those same block areas with an embedded Korean font.
->>>>>>> main
+- Groups words into lines/blocks, paints white rectangles over detected text lines, and flows Korean translation into sufficiently large body text blocks with a consistent embedded Korean font size.
 - Keeps figures, charts, and visual layout visible because they remain part of the page background.
 - Detects `References`, `Bibliography`, `Works Cited`, or `참고문헌`; pages after the reference heading are dropped, and text below the reference heading on the same page is masked.
 
@@ -52,11 +49,8 @@ If either command is missing, Paper Lens still returns the normal bilingual summ
 
 - This MVP preserves figures by using the original page as a raster background. It is visually close to the source, but not a fully editable/vector-preserving PDF.
 - Text block detection quality depends on the PDF's internal text layer. Complex multi-column layouts, tables, equations, or overlapping annotations may require manual tuning.
-<<<<<<< codex/create-web-app-for-pdf-analysis-and-summary-ltpx8o
 - Korean text can be longer than the original English block. The renderer uses a consistent font size and flows text across detected body blocks; overflow can still be clipped for complex layouts. A Korean-capable font is required; by default the app looks for repo fonts and `@fontsource/noto-sans-kr`.
-=======
-- Korean text can be longer than the original English block. The renderer reduces font size and clips overflow when needed. A Korean-capable font is required; by default the app looks for repo fonts and `@fontsource/noto-sans-kr`.
->>>>>>> main
+- Korean text can be longer than the original English block. The renderer uses a consistent font size and flows text across detected body blocks; overflow can still be clipped for complex layouts. A Korean-capable font is required; by default the app looks for repo fonts and `@fontsource/noto-sans-kr`.
 - Scanned PDFs still need OCR before this pipeline can identify text boxes.
 - Full-paper translation can take longer and use more OpenAI tokens than summary-only analysis. Each translation chunk is retried, and if a chunk still fails the app returns a partial translation rather than failing the whole analysis request.
 

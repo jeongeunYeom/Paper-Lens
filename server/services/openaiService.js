@@ -13,10 +13,15 @@ const SUMMARY_SCHEMA = {
       year: { type: 'string' },
       abstract: { type: 'string' },
       background: { type: 'string' },
+      backgroundEnglish: { type: 'string' },
       purpose: { type: 'string' },
+      purposeEnglish: { type: 'string' },
       method: { type: 'string' },
+      methodEnglish: { type: 'string' },
       results: { type: 'array', items: { type: 'string' } },
+      resultsEnglish: { type: 'array', items: { type: 'string' } },
       limitations: { type: 'string' },
+      limitationsEnglish: { type: 'string' },
       keywords: { type: 'array', minItems: 5, maxItems: 5, items: { type: 'string' } },
       oneParagraphSummary: { type: 'string' },
       englishSummary: { type: 'string' },
@@ -29,10 +34,15 @@ const SUMMARY_SCHEMA = {
       'year',
       'abstract',
       'background',
+      'backgroundEnglish',
       'purpose',
+      'purposeEnglish',
       'method',
+      'methodEnglish',
       'results',
+      'resultsEnglish',
       'limitations',
+      'limitationsEnglish',
       'keywords',
       'oneParagraphSummary',
       'englishSummary',
@@ -51,7 +61,7 @@ const isMockSummaryEnabled = isEnabled(process.env.USE_MOCK_SUMMARY);
 const isRuleBasedFallbackEnabled = isEnabled(process.env.ALLOW_RULE_BASED_FALLBACK);
 const FALLBACK_MESSAGE = 'OpenAI API 없이 규칙 기반으로 추출한 요약입니다. 실제 AI 요약보다 정확도가 낮을 수 있습니다.';
 const TRANSLATION_CHUNK_SIZE = Number(process.env.TRANSLATION_CHUNK_SIZE || 3500);
-const MAX_TRANSLATION_INPUT_CHARS = Number(process.env.MAX_TRANSLATION_INPUT_CHARS || 20000);
+const MAX_TRANSLATION_INPUT_CHARS = Number(process.env.MAX_TRANSLATION_INPUT_CHARS || 120000);
 const TRANSLATION_RETRY_ATTEMPTS = Number(process.env.TRANSLATION_RETRY_ATTEMPTS || 3);
 const STOPWORDS = new Set([
   'the', 'and', 'for', 'that', 'with', 'this', 'from', 'are', 'was', 'were', 'have', 'has', 'had', 'not', 'but',
@@ -88,10 +98,12 @@ export async function summarizePaper(text, pdfMetadata = {}) {
           role: 'system',
           content: [
             '당신은 학술 논문 분석 도우미입니다.',
-            '제공된 PDF 텍스트에 근거해서만 한국어 요약 보고서를 작성하세요.',
+            '제공된 PDF 텍스트에 근거해서만 논문 요약 보고서를 작성하세요.',
             '알 수 없는 항목은 추측하지 말고 "확인할 수 없음"이라고 쓰세요.',
             '핵심 키워드는 반드시 5개만 반환하세요.',
-            'results는 원문 복사가 아니라 3~5개의 짧은 한국어 bullet 문장 배열로 반환하세요.',
+            'background, purpose, method, results, limitations는 한국어로 작성하세요.',
+            'backgroundEnglish, purposeEnglish, methodEnglish, resultsEnglish, limitationsEnglish는 같은 내용을 영어로 작성하세요.',
+            'results와 resultsEnglish는 원문 복사가 아니라 3~5개의 짧은 bullet 문장 배열로 반환하세요.',
             'koreanSummary는 한국어 한 문단 요약, englishSummary는 영어 한 문단 요약으로 작성하세요.',
             'sourceLanguage는 원문 주요 언어가 영어면 en, 한국어면 ko, 판단이 어려우면 unknown으로 반환하세요.'
           ].join('\n')
@@ -138,7 +150,9 @@ export async function translatePaperToKorean(text, pdfMetadata = {}) {
     };
   }
 
-  const sourceText = stripReferences(text).slice(0, MAX_TRANSLATION_INPUT_CHARS);
+  const sourceWithoutReferences = stripReferences(text);
+  const isTranslationTruncated = sourceWithoutReferences.length > MAX_TRANSLATION_INPUT_CHARS;
+  const sourceText = sourceWithoutReferences.slice(0, MAX_TRANSLATION_INPUT_CHARS);
   if (isMockSummaryEnabled) {
     return {
       sourceLanguage,
@@ -180,8 +194,8 @@ export async function translatePaperToKorean(text, pdfMetadata = {}) {
     title: `${pdfMetadata.Title || '영문 논문'} 한국어 번역본`,
     body,
     note: failedChunks.length
-      ? `참고문헌 섹션은 제외했습니다. ${failedChunks.join(', ')}번째 본문 조각은 번역에 실패해 표시 문구로 대체했습니다.`
-      : '참고문헌 섹션은 제외했습니다. 현재 서버는 PDF 텍스트 추출 기반이므로 원본 figure 이미지를 동일하게 복제하지는 못하고, 텍스트와 캡션 번역을 중심으로 생성합니다.'
+      ? `참고문헌 섹션은 제외했습니다. ${failedChunks.join(', ')}번째 본문 조각은 번역에 실패해 표시 문구로 대체했습니다.${isTranslationTruncated ? ' 서버 번역 입력 제한 때문에 본문 일부가 제외됐습니다.' : ''}`
+      : `참고문헌 섹션은 제외했습니다.${isTranslationTruncated ? ' 서버 번역 입력 제한 때문에 본문 일부가 제외됐습니다. MAX_TRANSLATION_INPUT_CHARS 값을 늘리면 더 긴 논문을 번역할 수 있습니다.' : ''}`
   };
 }
 
@@ -287,10 +301,11 @@ function attachTokenUsage(summary, tokenUsage) {
 function buildPromptText(text, pdfMetadata = {}) {
   return [
     '당신은 학술 논문 분석 도우미입니다.',
-    '제공된 PDF 텍스트에 근거해서만 한국어 요약 보고서를 작성하세요.',
+    '제공된 PDF 텍스트에 근거해서만 논문 요약 보고서를 작성하세요.',
     '알 수 없는 항목은 추측하지 말고 "확인할 수 없음"이라고 쓰세요.',
     '핵심 키워드는 반드시 5개만 반환하세요.',
-    'results는 원문 복사가 아니라 3~5개의 짧은 한국어 bullet 문장 배열로 반환하세요.',
+    'background/purpose/method/results/limitations는 한국어로, backgroundEnglish/purposeEnglish/methodEnglish/resultsEnglish/limitationsEnglish는 영어로 작성하세요.',
+    'results와 resultsEnglish는 원문 복사가 아니라 3~5개의 짧은 bullet 문장 배열로 반환하세요.',
     'koreanSummary는 한국어 한 문단 요약, englishSummary는 영어 한 문단 요약으로 작성하세요.',
     'sourceLanguage는 원문 주요 언어가 영어면 en, 한국어면 ko, 판단이 어려우면 unknown으로 반환하세요.',
     `PDF 메타데이터: ${JSON.stringify(pdfMetadata)}`,

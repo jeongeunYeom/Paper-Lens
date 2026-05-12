@@ -118,23 +118,16 @@ function renderResults(analysis) {
       ['핵심 키워드', summary.keywords?.join(', ') || '확인할 수 없음']
     ])),
     createTokenUsageCard(analysis.tokenUsage),
-    createTextCard('연구 배경', summary.background),
-    createTextCard('연구 목적', summary.purpose),
-    createTextCard('연구 방법', summary.method || summary.methods),
-    createListCard('주요 결과', summary.results || summary.keyFindings),
-    createTextCard('한계점', summary.limitations),
+    createBilingualTextCard('연구 배경 / Background', summary.background, summary.backgroundEnglish),
+    createBilingualTextCard('연구 목적 / Purpose', summary.purpose, summary.purposeEnglish),
+    createBilingualTextCard('연구 방법 / Method', summary.method || summary.methods, summary.methodEnglish || summary.methodsEnglish),
+    createBilingualListCard('주요 결과 / Key Results', summary.results || summary.keyFindings, summary.resultsEnglish || summary.keyFindingsEnglish),
+    createBilingualTextCard('한계점 / Limitations', summary.limitations, summary.limitationsEnglish),
     createCard('핵심 키워드', createKeywordList(summary.keywords || [])),
     createTextCard('요약본 (국문)', summary.koreanSummary || summary.oneParagraphSummary),
     createTextCard('Summary (English)', summary.englishSummary),
-    createTextCard('한 문단 요약', summary.oneParagraphSummary),
     createCard('유사 논문 추천', createRecommendationList(analysis.recommendations || []))
   ];
-
-  if (['translated', 'partial'].includes(analysis.translation?.status)) {
-    resultCards.splice(2, 0, createTranslationPreviewCard(analysis.translation));
-  } else if (analysis.translation?.sourceLanguage) {
-    resultCards.splice(2, 0, createTextCard('번역본', analysis.translation.note));
-  }
 
   results.append(...resultCards);
 
@@ -187,31 +180,6 @@ async function downloadReportPdf(analysis, button) {
   }
 }
 
-function createTranslationPreviewCard(translation) {
-  const wrapper = document.createElement('div');
-  wrapper.className = 'paragraph-stack';
-
-  const note = document.createElement('p');
-  note.className = 'muted';
-  note.textContent = translation.note || '영문 논문 본문을 참고문헌 제외 후 한국어로 번역했습니다.';
-  wrapper.append(note);
-
-  for (const paragraphText of splitIntoParagraphs(translation.body).slice(0, 3)) {
-    const paragraph = document.createElement('p');
-    paragraph.textContent = paragraphText;
-    wrapper.append(paragraph);
-  }
-
-  if (cleanText(translation.body).length > 1200) {
-    const more = document.createElement('p');
-    more.className = 'muted';
-    more.textContent = '전체 번역문은 PDF 다운로드 파일에서 확인하세요.';
-    wrapper.append(more);
-  }
-
-  return createCard('영문 원문 한국어 번역본', wrapper);
-}
-
 function buildReportFileName(analysis = {}) {
   const title = analysis.summary?.title || analysis.fileName?.replace(/\.pdf$/i, '') || '논문';
   return `${sanitizeFileName(title)}_요약.pdf`;
@@ -262,6 +230,52 @@ function formatCurrency(value, currency = 'USD') {
   return `$${amount.toFixed(6)}`;
 }
 
+
+function createBilingualTextCard(title, koreanText, englishText) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'paragraph-stack bilingual-stack';
+  appendLanguageSection(wrapper, '한국어', koreanText);
+  appendLanguageSection(wrapper, 'English', englishText);
+  return createCard(title, wrapper);
+}
+
+function createBilingualListCard(title, koreanItems, englishItems) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'paragraph-stack bilingual-stack';
+  appendLanguageSection(wrapper, '한국어', koreanItems, { list: true });
+  appendLanguageSection(wrapper, 'English', englishItems, { list: true });
+  return createCard(title, wrapper);
+}
+
+function appendLanguageSection(wrapper, label, value, { list = false } = {}) {
+  const heading = document.createElement('p');
+  heading.className = 'language-label';
+  heading.textContent = label;
+  wrapper.append(heading);
+
+  if (list) {
+    wrapper.append(createInlineList(value));
+    return;
+  }
+
+  for (const paragraphText of splitIntoParagraphs(value)) {
+    const paragraph = document.createElement('p');
+    paragraph.textContent = paragraphText;
+    wrapper.append(paragraph);
+  }
+}
+
+function createInlineList(value) {
+  const list = document.createElement('ul');
+  list.className = 'bullet-list';
+  for (const item of toBulletItems(value)) {
+    const row = document.createElement('li');
+    row.textContent = item;
+    list.append(row);
+  }
+  return list;
+}
+
 function createTextCard(title, text) {
   const wrapper = document.createElement('div');
   wrapper.className = 'paragraph-stack';
@@ -273,20 +287,6 @@ function createTextCard(title, text) {
   }
 
   return createCard(title, wrapper);
-}
-
-function createListCard(title, value) {
-  const items = toBulletItems(value);
-  const list = document.createElement('ul');
-  list.className = 'bullet-list';
-
-  for (const item of items) {
-    const row = document.createElement('li');
-    row.textContent = item;
-    list.append(row);
-  }
-
-  return createCard(title, list);
 }
 
 function createCard(title, content) {

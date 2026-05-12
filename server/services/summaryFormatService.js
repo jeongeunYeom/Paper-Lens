@@ -8,10 +8,15 @@ export function normalizeSummary(summary = {}) {
     authors: normalizeAuthors(summary.authors),
     year: cleanText(summary.year || summary.publicationYear) || '확인할 수 없음',
     background: summarizeText(summary.background, { maxSentences: 4, maxLength: 700 }),
+    backgroundEnglish: summarizeText(summary.backgroundEnglish || summary.background_en, { maxSentences: 4, maxLength: 700 }),
     purpose: summarizeText(summary.purpose, { maxSentences: 3, maxLength: 520 }),
+    purposeEnglish: summarizeText(summary.purposeEnglish || summary.purpose_en, { maxSentences: 3, maxLength: 520 }),
     method: summarizeText(summary.method || summary.methods, { maxSentences: 4, maxLength: 700 }),
+    methodEnglish: summarizeText(summary.methodEnglish || summary.methodsEnglish || summary.method_en || summary.methods_en, { maxSentences: 4, maxLength: 700 }),
     results: results.length ? results : [EMPTY_MESSAGE],
+    resultsEnglish: toBulletItems(summary.resultsEnglish || summary.keyFindingsEnglish || summary.results_en || summary.findings_en, { maxItems: 5, maxLength: 180 }),
     limitations: summarizeText(summary.limitations, { maxSentences: 3, maxLength: 520 }),
+    limitationsEnglish: summarizeText(summary.limitationsEnglish || summary.limitations_en, { maxSentences: 3, maxLength: 520 }),
     keywords,
     oneParagraphSummary: summarizeText(summary.oneParagraphSummary || summary.koreanSummary || summary.summary || summary.abstract, { maxSentences: 4, maxLength: 760 }),
     koreanSummary: summarizeText(summary.koreanSummary || summary.oneParagraphSummary || summary.summary || summary.abstract, { maxSentences: 4, maxLength: 760 }),
@@ -24,7 +29,9 @@ export function normalizeSummary(summary = {}) {
     ...normalized,
     publicationYear: normalized.year,
     methods: normalized.method,
-    keyFindings: normalized.results
+    methodsEnglish: normalized.methodEnglish,
+    keyFindings: normalized.results,
+    keyFindingsEnglish: normalized.resultsEnglish
   };
 }
 

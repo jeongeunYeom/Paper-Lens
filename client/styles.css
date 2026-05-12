@@ -74,6 +74,9 @@ h1 { color: #111b36; font-size: clamp(2rem, 4.4vw, 3.8rem); line-height: 1.12; l
 .result-card p, .result-card div, .result-card li { line-height: 1.78; font-size: 1rem; }
 .paragraph-stack { display: grid; gap: 14px; max-width: 82ch; }
 .paragraph-stack p { margin: 0; color: #172033; }
+.bilingual-stack { gap: 10px; }
+.paragraph-stack .language-label { margin-top: 6px; color: #153e91; font-size: 0.9rem; font-weight: 900; letter-spacing: 0.02em; }
+.paragraph-stack .language-label:first-child { margin-top: 0; }
 .bullet-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; max-width: 86ch; }
 .bullet-list li { position: relative; padding-left: 22px; color: #172033; }
 .bullet-list li::before { content: ""; position: absolute; left: 0; top: 0.82em; width: 7px; height: 7px; border-radius: 999px; background: #315efb; }

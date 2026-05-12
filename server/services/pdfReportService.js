@@ -71,18 +71,28 @@ function renderReport(doc, analysis) {
 
   renderInfoCard(doc, summary);
   renderBilingualSummary(doc, summary);
-  renderSection(doc, '1. 연구 배경', summary.background);
-  renderSection(doc, '2. 연구 목적', summary.purpose);
-  renderSection(doc, '3. 연구 방법', summary.method);
-  renderSection(doc, '4. 주요 결과', summary.results, { bullets: true });
-  renderSection(doc, '5. 한계점', summary.limitations);
+  renderBilingualSection(doc, '1. 연구 배경 / Background', summary.background, summary.backgroundEnglish);
+  renderBilingualSection(doc, '2. 연구 목적 / Purpose', summary.purpose, summary.purposeEnglish);
+  renderBilingualSection(doc, '3. 연구 방법 / Method', summary.method, summary.methodEnglish);
+  renderBilingualSection(doc, '4. 주요 결과 / Key Results', summary.results, summary.resultsEnglish, { bullets: true });
+  renderBilingualSection(doc, '5. 한계점 / Limitations', summary.limitations, summary.limitationsEnglish);
   renderSection(doc, '6. 핵심 키워드', summary.keywords, { bullets: true });
-  renderSection(doc, '7. 한 문단 요약', summary.oneParagraphSummary);
 }
 
 function renderBilingualSummary(doc, summary) {
-  renderSection(doc, '요약본 (국문)', summary.koreanSummary || summary.oneParagraphSummary);
-  renderSection(doc, 'Summary (English)', summary.englishSummary || 'English summary is unavailable.');
+  renderBilingualSection(
+    doc,
+    '요약 / Summary',
+    summary.koreanSummary || summary.oneParagraphSummary,
+    summary.englishSummary || 'English summary is unavailable.'
+  );
+}
+
+function renderBilingualSection(doc, title, koreanContent, englishContent, { bullets = false } = {}) {
+  renderSection(doc, title, [
+    { label: '한국어', content: koreanContent, bullets },
+    { label: 'English', content: englishContent || 'English content is unavailable.', bullets }
+  ], { bilingual: true });
 }
 
 function renderInfoCard(doc, summary) {
@@ -121,23 +131,41 @@ function renderInfoCard(doc, summary) {
   doc.y = startY + height + 18;
 }
 
-function renderSection(doc, title, content, { bullets = false, maxParagraphs = 4 } = {}) {
+function renderSection(doc, title, content, { bullets = false, maxParagraphs = 4, bilingual = false } = {}) {
   const layout = getSectionLayout(doc);
-  const items = bullets ? toBulletItems(content, { maxItems: 6, maxLength: 180 }) : splitIntoParagraphs(content || EMPTY_MESSAGE, { sentencesPerParagraph: 2, maxParagraphs });
-  const renderedItems = items.length ? items : [EMPTY_MESSAGE];
-  const estimatedHeight = estimateSectionHeight(doc, title, renderedItems, { bullets, layout });
+  const renderedItems = bilingual
+    ? content.map((section) => ({
+      ...section,
+      items: section.bullets
+        ? toBulletItems(section.content, { maxItems: 6, maxLength: 180 })
+        : splitIntoParagraphs(section.content || EMPTY_MESSAGE, { sentencesPerParagraph: 2, maxParagraphs })
+    }))
+    : (bullets ? toBulletItems(content, { maxItems: 6, maxLength: 180 }) : splitIntoParagraphs(content || EMPTY_MESSAGE, { sentencesPerParagraph: 2, maxParagraphs }));
+  const estimatedHeight = bilingual
+    ? estimateBilingualSectionHeight(doc, title, renderedItems, layout)
+    : estimateSectionHeight(doc, title, renderedItems.length ? renderedItems : [EMPTY_MESSAGE], { bullets, layout });
   ensureSpace(doc, estimatedHeight);
 
   doc.moveDown(0.35);
   doc.fillColor('#12357c').fontSize(14).text(title, layout.x, doc.y, { width: layout.width, lineGap: 1 });
   doc.moveDown(0.45);
 
-  if (bullets) {
-    renderedItems.forEach((item) => renderBullet(doc, item, layout));
+  if (bilingual) {
+    renderedItems.forEach((section) => renderLanguageBlock(doc, section, layout));
+  } else if (bullets) {
+    const items = renderedItems.length ? renderedItems : [EMPTY_MESSAGE];
+    items.forEach((item) => renderBullet(doc, item, layout));
   } else {
-    renderedItems.forEach((paragraph) => renderParagraph(doc, paragraph, layout));
+    const items = renderedItems.length ? renderedItems : [EMPTY_MESSAGE];
+    items.forEach((paragraph) => renderParagraph(doc, paragraph, layout));
   }
   doc.moveDown(0.7);
+}
+
+function estimateBilingualSectionHeight(doc, title, sections, layout) {
+  const sectionItems = sections.flatMap((section) => section.items.length ? section.items : [EMPTY_MESSAGE]);
+  const languageLabelsHeight = sections.length * 20;
+  return languageLabelsHeight + estimateSectionHeight(doc, title, sectionItems, { bullets: sections.some((section) => section.bullets), layout });
 }
 
 function estimateSectionHeight(doc, title, items, { bullets, layout }) {
@@ -151,6 +179,18 @@ function estimateSectionHeight(doc, title, items, { bullets, layout }) {
     return total + doc.heightOfString(item, { width, lineGap }) + spacing;
   }, 0);
   return 28 + titleHeight + itemHeight;
+}
+
+function renderLanguageBlock(doc, section, layout) {
+  doc.fillColor('#1e3a8a').fontSize(9.5).text(section.label, layout.x, doc.y, { width: layout.width });
+  doc.moveDown(0.2);
+  const items = section.items.length ? section.items : [EMPTY_MESSAGE];
+  if (section.bullets) {
+    items.forEach((item) => renderBullet(doc, item, layout));
+  } else {
+    items.forEach((paragraph) => renderParagraph(doc, paragraph, layout));
+  }
+  doc.moveDown(0.25);
 }
 
 function renderParagraph(doc, text, layout) {
