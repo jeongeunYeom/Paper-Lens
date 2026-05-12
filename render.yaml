@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: paper-lens
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.1
+      - key: USE_MOCK_SUMMARY
+        value: "false"
