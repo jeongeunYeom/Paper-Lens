@@ -39,7 +39,8 @@ router.post('/analyze', upload.single('paper'), async (req, res, next) => {
     }
 
     const extracted = await extractTextFromPdf(uploadedPath);
-    const summary = await summarizePaper(extracted.text, extracted.info);
+    const summaryResult = await summarizePaper(extracted.text, extracted.info);
+    const { _tokenUsage: tokenUsage = null, ...summary } = summaryResult;
     const recommendations = await searchSimilarPapers(summary);
     const reportId = crypto.randomUUID();
     const analysis = {
@@ -47,7 +48,8 @@ router.post('/analyze', upload.single('paper'), async (req, res, next) => {
       fileName: req.file.originalname,
       pageCount: extracted.pageCount,
       summary,
-      recommendations
+      recommendations,
+      tokenUsage
     };
 
     reportCache.set(reportId, analysis);

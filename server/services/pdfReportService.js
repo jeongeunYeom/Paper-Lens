@@ -46,6 +46,7 @@ function renderReport(doc, analysis) {
   doc.moveDown(1.1);
 
   renderInfoCard(doc, summary);
+  renderTokenUsageCard(doc, analysis.tokenUsage);
   renderSection(doc, '1. 연구 배경', summary.background);
   renderSection(doc, '2. 연구 목적', summary.purpose);
   renderSection(doc, '3. 연구 방법', summary.method);
@@ -78,6 +79,55 @@ function renderInfoCard(doc, summary) {
     y += 18;
   });
   doc.y = startY + height + 18;
+}
+
+function renderTokenUsageCard(doc, tokenUsage) {
+  if (!tokenUsage) return;
+
+  const rows = tokenUsage.usedOpenAi
+    ? [
+      ['요약 방식', `OpenAI API (${tokenUsage.model || 'model unknown'})`],
+      ['입력/출력 토큰', `${formatNumber(tokenUsage.promptTokens)} / ${formatNumber(tokenUsage.completionTokens)}`],
+      ['총 토큰', formatNumber(tokenUsage.totalTokens)],
+      ['예상 비용', formatCurrency(tokenUsage.estimatedCostUsd, tokenUsage.currency)],
+      ['단가 기준', `입력 $${tokenUsage.inputPricePerMillion}/1M · 출력 $${tokenUsage.outputPricePerMillion}/1M`]
+    ]
+    : [
+      ['요약 방식', tokenUsage.source === 'mock' ? '테스트 모드' : '규칙 기반 요약'],
+      ['총 토큰', '0'],
+      ['예상 비용', '$0.000000'],
+      ['비고', tokenUsage.note || 'OpenAI API를 사용하지 않았습니다.']
+    ];
+
+  renderCompactCard(doc, 'OpenAI 토큰 사용량', rows);
+}
+
+function renderCompactCard(doc, title, rows) {
+  const x = doc.page.margins.left;
+  const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  const height = 42 + rows.length * 15;
+  ensureSpace(doc, height + 16);
+  const startY = doc.y;
+
+  doc.roundedRect(x, startY, width, height, 12).fill('#fbfdff').stroke('#dbe4f0');
+  doc.fillColor('#1e3a8a').fontSize(12).text(title, x + 18, startY + 12);
+  let y = startY + 32;
+  rows.forEach(([label, value]) => {
+    doc.fillColor('#64748b').fontSize(8.8).text(label, x + 18, y, { width: 86 });
+    doc.fillColor('#111827').fontSize(9.3).text(value || EMPTY_MESSAGE, x + 106, y, { width: width - 126, lineGap: 1 });
+    y += 15;
+  });
+  doc.y = startY + height + 16;
+}
+
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString('ko-KR');
+}
+
+function formatCurrency(value, currency = 'USD') {
+  const amount = Number(value || 0);
+  if (currency !== 'USD') return `${amount.toFixed(6)} ${currency}`;
+  return `$${amount.toFixed(6)}`;
 }
 
 function renderSection(doc, title, content, { bullets = false } = {}) {

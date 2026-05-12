@@ -91,6 +91,7 @@ function renderResults(analysis) {
       ['출판연도', summary.year || summary.publicationYear || '확인할 수 없음'],
       ['핵심 키워드', summary.keywords?.join(', ') || '확인할 수 없음']
     ])),
+    createTokenUsageCard(analysis.tokenUsage),
     createTextCard('연구 배경', summary.background),
     createTextCard('연구 목적', summary.purpose),
     createTextCard('연구 방법', summary.method || summary.methods),
@@ -103,6 +104,39 @@ function renderResults(analysis) {
 
   uploadCard.hidden = true;
   results.hidden = false;
+}
+
+function createTokenUsageCard(tokenUsage) {
+  if (!tokenUsage) return createTextCard('OpenAI 토큰 사용량', '토큰 사용량 정보를 확인할 수 없습니다.');
+
+  const rows = tokenUsage.usedOpenAi
+    ? [
+      ['요약 방식', `OpenAI API (${tokenUsage.model || 'model unknown'})`],
+      ['입력 토큰', formatNumber(tokenUsage.promptTokens)],
+      ['출력 토큰', formatNumber(tokenUsage.completionTokens)],
+      ['총 토큰', formatNumber(tokenUsage.totalTokens)],
+      ['예상 비용', formatCurrency(tokenUsage.estimatedCostUsd, tokenUsage.currency)],
+      ['단가 기준', `입력 $${tokenUsage.inputPricePerMillion}/1M · 출력 $${tokenUsage.outputPricePerMillion}/1M`]
+    ]
+    : [
+      ['요약 방식', tokenUsage.source === 'mock' ? '테스트 모드' : '규칙 기반 요약'],
+      ['입력 토큰', '0'],
+      ['출력 토큰', '0'],
+      ['예상 비용', '$0.000000'],
+      ['비고', tokenUsage.note || 'OpenAI API를 사용하지 않았습니다.']
+    ];
+
+  return createCard('OpenAI 토큰 사용량', createInfoList(rows));
+}
+
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString('ko-KR');
+}
+
+function formatCurrency(value, currency = 'USD') {
+  const amount = Number(value || 0);
+  if (currency !== 'USD') return `${amount.toFixed(6)} ${currency}`;
+  return `$${amount.toFixed(6)}`;
 }
 
 function createTextCard(title, text) {
