@@ -143,7 +143,7 @@ async function downloadReportPdf(analysis, button) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `paper-lens-${analysis.reportId || 'summary'}.pdf`;
+    link.download = buildReportFileName(analysis);
     document.body.append(link);
     link.click();
     link.remove();
@@ -154,6 +154,22 @@ async function downloadReportPdf(analysis, button) {
     button.textContent = originalText;
     button.removeAttribute('aria-busy');
   }
+}
+
+function buildReportFileName(analysis = {}) {
+  const title = analysis.summary?.title || analysis.fileName?.replace(/\.pdf$/i, '') || '논문';
+  return `${sanitizeFileName(title)}_요약.pdf`;
+}
+
+function sanitizeFileName(value) {
+  return String(value || '논문')
+    .normalize('NFC')
+    .replace(/[\/\?%*:|"<>]/g, ' ')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/g, '')
+    .slice(0, 120) || '논문';
 }
 
 function createTokenUsageCard(tokenUsage) {

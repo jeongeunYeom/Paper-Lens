@@ -81,7 +81,7 @@ router.post('/reports/pdf', async (req, res, next) => {
       recommendations: analysis.recommendations || [],
       tokenUsage: analysis.tokenUsage || null
     });
-    sendPdfBuffer(res, pdfBuffer, analysis.reportId || 'download');
+    sendPdfBuffer(res, pdfBuffer, buildReportFileName(analysis));
   } catch (error) {
     next(error);
   }
@@ -97,21 +97,51 @@ router.get('/reports/:reportId.pdf', async (req, res, next) => {
     }
 
     const pdfBuffer = await createSummaryReportPdf(analysis);
-    sendPdfBuffer(res, pdfBuffer, analysis.reportId);
+    sendPdfBuffer(res, pdfBuffer, buildReportFileName(analysis));
   } catch (error) {
     next(error);
   }
 });
 
 
-function sendPdfBuffer(res, pdfBuffer, reportId) {
+function buildReportFileName(analysis = {}) {
+  const title = analysis.summary?.title || path.parse(analysis.fileName || '').name || '논문';
+  return `${sanitizeFileName(title)}_요약.pdf`;
+}
+
+function sanitizeFileName(value) {
+  return String(value || '논문')
+    .normalize('NFC')
+    .replace(/[\/\?%*:|"<>]/g, ' ')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/g, '')
+    .slice(0, 120) || '논문';
+}
+
+function ensurePdfExtension(fileName) {
+  return fileName.toLowerCase().endsWith('.pdf') ? fileName : `${fileName}.pdf`;
+}
+
+function buildContentDisposition(fileName) {
+  const asciiFallback = fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeRFC5987ValueChars(fileName)}`;
+}
+
+function encodeRFC5987ValueChars(value) {
+  return encodeURIComponent(value).replace(/['()]/g, escape).replace(/\*/g, '%2A');
+}
+
+function sendPdfBuffer(res, pdfBuffer, fileName) {
   if (!Buffer.isBuffer(pdfBuffer) || pdfBuffer.length < 1500) {
     const error = new Error('요약 보고서 PDF 생성에 실패했습니다. 파일 크기가 비정상적으로 작습니다.');
     error.status = 500;
     throw error;
   }
+  const safeFileName = ensurePdfExtension(fileName || '논문_요약');
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="paper-lens-${reportId}.pdf"`);
+  res.setHeader('Content-Disposition', buildContentDisposition(safeFileName));
   res.setHeader('Content-Length', String(pdfBuffer.length));
   res.send(pdfBuffer);
 }
