@@ -43,7 +43,7 @@ router.post('/analyze', upload.single('paper'), async (req, res, next) => {
     const extracted = await extractTextFromPdf(uploadedPath);
     const summaryResult = await summarizePaper(extracted.text, extracted.info);
     const { _tokenUsage: tokenUsage = null, ...summary } = summaryResult;
-    const translation = await translatePaperToKorean(extracted.text, extracted.info);
+    const translation = await translatePaperSafely(extracted.text, extracted.info);
     const reportId = crypto.randomUUID();
     const layoutTranslation = await buildLayoutTranslationReport(uploadedPath, translation, reportId);
     const recommendations = await searchSimilarPapers(summary);
@@ -125,8 +125,24 @@ router.get('/reports/:reportId.pdf', async (req, res, next) => {
 });
 
 
+async function translatePaperSafely(text, metadata) {
+  try {
+    return await translatePaperToKorean(text, metadata);
+  } catch (error) {
+    console.warn('OpenAI translation failed without aborting analysis:', error.message);
+    return {
+      sourceLanguage: 'unknown',
+      targetLanguage: 'ko',
+      status: 'failed',
+      title: '한국어 번역본',
+      body: '',
+      note: `번역 처리 중 오류가 발생했습니다. 요약 결과는 계속 제공합니다. (${error.message})`
+    };
+  }
+}
+
 async function buildLayoutTranslationReport(sourcePdfPath, translation, reportId) {
-  if (!sourcePdfPath || translation?.status !== 'translated') return null;
+  if (!sourcePdfPath || !['translated', 'partial'].includes(translation?.status)) return null;
 
   try {
     const buffer = await createFigurePreservingTranslationPdf(sourcePdfPath, translation, { reportId });

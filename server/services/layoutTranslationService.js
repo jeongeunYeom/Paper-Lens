@@ -23,7 +23,7 @@ const FONT_CANDIDATES = [
 ].filter(Boolean);
 
 export async function createFigurePreservingTranslationPdf(sourcePdfPath, translation, { reportId = 'unknown' } = {}) {
-  if (!translation || translation.status !== 'translated' || !translation.body) {
+  if (!translation || !['translated', 'partial'].includes(translation.status) || !translation.body) {
     return null;
   }
 

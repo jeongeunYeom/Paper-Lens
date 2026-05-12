@@ -87,7 +87,7 @@ function renderBilingualSummary(doc, summary) {
 }
 
 function renderTranslation(doc, translation) {
-  if (!translation || translation.status !== 'translated' || !translation.body) return;
+  if (!translation || !['translated', 'partial'].includes(translation.status) || !translation.body) return;
 
   const title = '영문 원문 한국어 번역본 (참고문헌 제외)';
   const note = translation.note ? `번역 메모: ${translation.note}` : '';
