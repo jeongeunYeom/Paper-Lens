@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { cleanText, normalizeSummary, summarizeText, toBulletItems } from './summaryFormatService.js';
+import { buildTokenUsage, createNonOpenAiUsage } from './tokenUsageService.js';
 
 const SUMMARY_SCHEMA = {
   name: 'paper_summary',
@@ -43,15 +44,6 @@ const STOPWORDS = new Set([
   'paper', 'study', 'research', 'using', 'based', 'between', 'these', 'those', 'their', 'which', 'into', 'than',
   '논문', '연구', '결과', '방법', '분석', '대한', '통해', '위한', '있다', '있는', '한다', '에서', '으로', '그리고'
 ]);
-const DEFAULT_TOKEN_PRICES_PER_1M = {
-  'gpt-4o-mini': { input: 0.15, output: 0.60 },
-  'gpt-4o-mini-2024-07-18': { input: 0.15, output: 0.60 },
-  'gpt-4o': { input: 2.50, output: 10.00 },
-  'gpt-4.1': { input: 2.00, output: 8.00 },
-  'gpt-4.1-mini': { input: 0.40, output: 1.60 },
-  'gpt-4.1-nano': { input: 0.10, output: 0.40 }
-};
-
 // OpenAI 키가 있으면 AI 요약을 사용하고, 없거나 실패하면 규칙 기반 요약으로 앱 흐름을 계속 진행합니다.
 export async function summarizePaper(text, pdfMetadata = {}) {
   if (isMockSummaryEnabled) {
@@ -97,53 +89,6 @@ export async function summarizePaper(text, pdfMetadata = {}) {
 
 function attachTokenUsage(summary, tokenUsage) {
   return { ...summary, _tokenUsage: tokenUsage };
-}
-
-function createNonOpenAiUsage(source, error = null) {
-  return {
-    source,
-    usedOpenAi: false,
-    promptTokens: 0,
-    completionTokens: 0,
-    totalTokens: 0,
-    estimatedCostUsd: 0,
-    currency: 'USD',
-    note: error ? `OpenAI 미사용: ${error.message}` : 'OpenAI API를 사용하지 않아 토큰 비용이 발생하지 않았습니다.'
-  };
-}
-
-function buildTokenUsage(usage = {}, model) {
-  const promptTokens = usage?.prompt_tokens ?? usage?.input_tokens ?? 0;
-  const completionTokens = usage?.completion_tokens ?? usage?.output_tokens ?? 0;
-  const totalTokens = usage?.total_tokens ?? promptTokens + completionTokens;
-  const cachedPromptTokens = usage?.prompt_tokens_details?.cached_tokens ?? usage?.input_tokens_details?.cached_tokens ?? 0;
-  const prices = getTokenPrices(model);
-  const estimatedCostUsd = ((promptTokens * prices.input) + (completionTokens * prices.output)) / 1_000_000;
-
-  return {
-    source: 'openai',
-    usedOpenAi: true,
-    model,
-    promptTokens,
-    completionTokens,
-    totalTokens,
-    cachedPromptTokens,
-    inputPricePerMillion: prices.input,
-    outputPricePerMillion: prices.output,
-    estimatedCostUsd: Number(estimatedCostUsd.toFixed(8)),
-    currency: 'USD',
-    note: '표시 비용은 텍스트 토큰 단가 기준 추정치입니다. 실제 청구액은 OpenAI 대시보드와 과금 정책을 확인하세요.'
-  };
-}
-
-function getTokenPrices(model) {
-  const inputOverride = Number(process.env.OPENAI_INPUT_PRICE_PER_1M_TOKENS);
-  const outputOverride = Number(process.env.OPENAI_OUTPUT_PRICE_PER_1M_TOKENS);
-  if (Number.isFinite(inputOverride) && Number.isFinite(outputOverride) && inputOverride >= 0 && outputOverride >= 0) {
-    return { input: inputOverride, output: outputOverride };
-  }
-
-  return DEFAULT_TOKEN_PRICES_PER_1M[model] || DEFAULT_TOKEN_PRICES_PER_1M['gpt-4o-mini'];
 }
 
 function createRuleBasedSummary(text, pdfMetadata = {}, reason = FALLBACK_MESSAGE) {

@@ -12,8 +12,6 @@ const FONT_CANDIDATES = [
   path.join(repoRoot, 'fonts/NotoSansKR-Regular.otf'),
   path.join(repoRoot, 'fonts/NotoSansKR-Regular.ttf'),
   path.join(repoRoot, 'fonts/Pretendard-Regular.otf'),
-  path.join(repoRoot, 'node_modules/@fontsource/noto-sans-kr/files/noto-sans-kr-korean-400-normal.woff2'),
-  path.join(repoRoot, 'node_modules/@fontsource/noto-sans-kr/files/noto-sans-kr-400-normal.woff2'),
   '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
   '/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf',
   '/usr/share/fonts/truetype/nanum/NanumGothic.ttf',
@@ -22,12 +20,21 @@ const FONT_CANDIDATES = [
 
 // 화면에 표시된 요약 결과만 PDF 보고서로 생성합니다. 원문 PDF는 포함하지 않습니다.
 export function createSummaryReportPdf(analysis) {
+  validateReportAnalysis(analysis);
+
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 44, size: 'A4', bufferPages: true, info: { Title: 'Paper Lens 논문 분석 보고서' } });
     const chunks = [];
 
     doc.on('data', (chunk) => chunks.push(chunk));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('end', () => {
+      const buffer = Buffer.concat(chunks);
+      if (buffer.length < 1500) {
+        return reject(new Error('요약 보고서 PDF 생성에 실패했습니다. 생성된 파일이 비정상적으로 작습니다.'));
+      }
+      console.log(`Generated summary PDF: ${buffer.length} bytes, sections=8, reportId=${analysis.reportId || 'unknown'}`);
+      return resolve(buffer);
+    });
     doc.on('error', reject);
 
     registerFont(doc);
@@ -35,6 +42,20 @@ export function createSummaryReportPdf(analysis) {
     addPageNumbers(doc);
     doc.end();
   });
+}
+
+function validateReportAnalysis(analysis) {
+  if (!analysis || typeof analysis !== 'object') {
+    throw new Error('요약 보고서 PDF를 생성할 분석 데이터가 없습니다. 다시 분석해 주세요.');
+  }
+  if (!analysis.summary || typeof analysis.summary !== 'object') {
+    throw new Error('요약 보고서 PDF를 생성할 summary 데이터가 없습니다. 다시 분석해 주세요.');
+  }
+  const summary = normalizeSummary(analysis.summary);
+  const requiredValues = [summary.title, summary.background, summary.purpose, summary.method, summary.oneParagraphSummary];
+  if (requiredValues.every((value) => !value || value === EMPTY_MESSAGE)) {
+    throw new Error('요약 보고서 PDF에 포함할 핵심 내용이 없습니다. 다시 분석해 주세요.' );
+  }
 }
 
 function renderReport(doc, analysis) {
@@ -52,7 +73,8 @@ function renderReport(doc, analysis) {
   renderSection(doc, '3. 연구 방법', summary.method);
   renderSection(doc, '4. 주요 결과', summary.results, { bullets: true });
   renderSection(doc, '5. 한계점', summary.limitations);
-  renderSection(doc, '6. 한 문단 요약', summary.oneParagraphSummary);
+  renderSection(doc, '6. 핵심 키워드', summary.keywords, { bullets: true });
+  renderSection(doc, '7. 한 문단 요약', summary.oneParagraphSummary);
   renderRecommendations(doc, analysis.recommendations || []);
 }
 
@@ -86,7 +108,8 @@ function renderTokenUsageCard(doc, tokenUsage) {
 
   const rows = tokenUsage.usedOpenAi
     ? [
-      ['요약 방식', `OpenAI API (${tokenUsage.model || 'model unknown'})`],
+      ['요약 방식', 'OpenAI API 요약'],
+      ['사용 모델명', tokenUsage.model || 'model unknown'],
       ['입력/출력 토큰', `${formatNumber(tokenUsage.promptTokens)} / ${formatNumber(tokenUsage.completionTokens)}`],
       ['총 토큰', formatNumber(tokenUsage.totalTokens)],
       ['예상 비용', formatCurrency(tokenUsage.estimatedCostUsd, tokenUsage.currency)],
@@ -167,7 +190,7 @@ function renderBullet(doc, text) {
 }
 
 function renderRecommendations(doc, recommendations = []) {
-  renderSectionTitle(doc, '7. 유사 논문 추천');
+  renderSectionTitle(doc, '8. 유사 논문 추천');
   if (!recommendations.length) {
     doc.fillColor('#64748b').fontSize(10.5).text('추천 논문을 찾지 못했습니다.', { lineGap: 5 });
     return;

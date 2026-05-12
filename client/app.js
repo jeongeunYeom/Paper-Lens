@@ -111,7 +111,8 @@ function createTokenUsageCard(tokenUsage) {
 
   const rows = tokenUsage.usedOpenAi
     ? [
-      ['요약 방식', `OpenAI API (${tokenUsage.model || 'model unknown'})`],
+      ['요약 방식', 'OpenAI API 요약'],
+      ['사용 모델명', tokenUsage.model || 'model unknown'],
       ['입력 토큰', formatNumber(tokenUsage.promptTokens)],
       ['출력 토큰', formatNumber(tokenUsage.completionTokens)],
       ['총 토큰', formatNumber(tokenUsage.totalTokens)],

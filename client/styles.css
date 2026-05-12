@@ -16,7 +16,7 @@ a { color: #2454d6; }
 
 .hero { text-align: center; margin: 0 auto 34px; max-width: 900px; }
 .eyebrow { color: #315efb; font-weight: 900; letter-spacing: 0.18em; text-transform: uppercase; margin: 0 0 10px; font-size: 0.84rem; }
-h1 { color: #111b36; font-size: clamp(2.25rem, 6vw, 4.35rem); line-height: 1.03; letter-spacing: -0.06em; margin: 0; }
+h1 { color: #111b36; font-size: clamp(2.1rem, 4.8vw, 4.1rem); line-height: 1.12; letter-spacing: -0.045em; margin: 0 auto; max-width: 980px; word-break: keep-all; overflow-wrap: normal; white-space: normal; text-wrap: balance; }
 .hero-copy { color: #52627a; max-width: 720px; margin: 20px auto 0; font-size: 1.08rem; line-height: 1.75; }
 
 .upload-card, .status-card, .result-card, .result-header {
@@ -90,6 +90,8 @@ dd { margin: 0; line-height: 1.65; }
 .reason { color: #3f4f6b; }
 
 @media (max-width: 760px) {
+  h1 { font-size: clamp(2rem, 10vw, 3rem); line-height: 1.16; letter-spacing: -0.035em; max-width: 10em; }
+  .hero-copy { font-size: 1rem; word-break: keep-all; overflow-wrap: normal; }
   .app-shell { width: min(100% - 24px, 1040px); padding: 32px 0 48px; }
   .upload-card { padding: 30px 18px; min-height: 330px; }
   .result-header { flex-direction: column; padding: 24px; }

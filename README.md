@@ -107,7 +107,7 @@ USE_MOCK_SUMMARY=true
 ## 보고서 UI/PDF 출력 개선 사항
 
 - 화면 결과 카드는 문장 단위 문단 분리와 bullet 목록을 사용해 보고서처럼 읽기 쉽게 표시합니다.
-- 요약 PDF는 `Paper Lens 논문 분석 보고서` 제목, 기본 정보 카드, 1~7번 본문 섹션, 유사 논문 추천 카드 순서로 생성됩니다.
+- 요약 PDF는 `Paper Lens 논문 분석 보고서` 제목, 기본 정보 카드, OpenAI 토큰 사용량 카드, 1~8번 본문 섹션, 유사 논문 추천 카드 순서로 생성됩니다.
 - PDF 한글 출력은 `REPORT_FONT_PATH`, `fonts/NotoSansKR-Regular.otf`, `fonts/NotoSansKR-Regular.ttf`, `fonts/Pretendard-Regular.otf`, `@fontsource/noto-sans-kr`, 시스템 Noto/Nanum 폰트 순서로 찾고, 폰트가 없으면 기본 폰트로 fallback합니다.
 - OpenAI API가 없거나 실패해도 규칙 기반 fallback이 긴 원문을 그대로 붙이지 않고 섹션·문장 단위로 최대 길이를 제한해 표시합니다.
 
@@ -119,6 +119,7 @@ client/styles.css
 server/services/openaiService.js
 server/services/summaryFormatService.js
 server/services/pdfReportService.js
+server/services/tokenUsageService.js
 fonts/README.md
 ```
 
