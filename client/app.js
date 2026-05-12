@@ -73,6 +73,26 @@ async function analyzePaper(file) {
   }
 }
 
+function renderLayoutTranslationAction(actions, analysis) {
+  if (!analysis.layoutTranslation) return;
+
+  if (analysis.layoutTranslation.status === 'ready') {
+    const link = document.createElement('a');
+    link.className = 'secondary-button';
+    link.href = `${API_BASE_URL}/reports/${analysis.reportId}.layout-translated.pdf`;
+    link.textContent = 'Figure 보존 번역 PDF';
+    actions.prepend(link);
+    return;
+  }
+
+  if (analysis.layoutTranslation.status === 'unavailable') {
+    const note = document.createElement('p');
+    note.className = 'muted action-note';
+    note.textContent = `Figure 보존 번역 PDF 생성 불가: ${analysis.layoutTranslation.message}`;
+    actions.append(note);
+  }
+}
+
 function renderResults(analysis) {
   const summary = analysis.summary || {};
   results.replaceChildren();
@@ -86,6 +106,7 @@ function renderResults(analysis) {
     event.preventDefault();
     downloadReportPdf(analysis, downloadLink);
   });
+  renderLayoutTranslationAction(header.querySelector('.actions'), analysis);
   header.querySelector('[data-field="resetButton"]').addEventListener('click', resetApp);
   results.append(header);
 

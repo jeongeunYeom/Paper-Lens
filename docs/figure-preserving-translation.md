@@ -1,71 +1,60 @@
-# Figure-preserving translated PDF implementation plan
+# Figure-preserving translated PDF pipeline
 
-Paper Lens currently extracts text with `pdf-parse` and renders a new report with `pdfkit`. That path is good for summaries, but it cannot reproduce the original PDF layout because `pdf-parse` does not expose each page's drawing operations, image XObjects, fonts, coordinates, or reading-order structure.
+Paper Lens now includes a first-pass layout-preserving translation pipeline for English papers. It is intentionally separate from the summary-report renderer because the regular `pdf-parse` + `pdfkit` summary path does not expose original page drawing operations, image XObjects, fonts, coordinates, or figure geometry.
 
-To generate a Korean translation PDF that keeps the original figures in the same position and shape, add a separate **layout-preserving translation pipeline** rather than extending the summary-report renderer.
+## What the first implementation does
 
-## Target behavior
+- Uses Poppler tools (`pdftoppm` and `pdftotext`) when they are available on the server.
+- Renders each original PDF page to a high-resolution PNG background.
+- Extracts text word bounding boxes with `pdftotext -bbox-layout`.
+- Groups words into lines/blocks, paints white rectangles over detected text blocks, and draws Korean translation text into those same block areas.
+- Keeps figures, charts, and visual layout visible because they remain part of the page background.
+- Detects `References`, `Bibliography`, `Works Cited`, or `참고문헌`; pages after the reference heading are dropped, and text below the reference heading on the same page is masked.
 
-- **English paper**: produce a translated PDF that keeps the original page geometry and figure placements, excludes References/Bibliography pages or sections, and also produce a bilingual summary report.
-- **Korean paper**: skip full-paper translation and produce only the bilingual summary report.
-- **Figures**: preserve original figure bitmaps/vector regions as page background or copied page objects. Translate surrounding text blocks and captions separately.
+## Runtime requirements
 
-## Recommended pipeline
+Install Poppler on the deployment image:
 
-1. **Parse page layout instead of plain text only**
-   - Use a renderer/layout tool such as `pdfjs-dist`, `PyMuPDF`, or a managed PDF extraction API.
-   - Extract per-page dimensions, text spans, bounding boxes, font sizes, and image/vector regions.
-   - Keep `pdf-parse` only for the lightweight summary path if desired.
+```bash
+# Debian/Ubuntu
+apt-get update && apt-get install -y poppler-utils
+```
 
-2. **Detect and remove the reference section**
-   - Locate headings such as `References`, `Bibliography`, `Works Cited`, or `참고문헌` using text spans and page coordinates.
-   - For the page where references start, keep only blocks before the heading.
-   - Drop following reference-only pages from the translated PDF.
+Required commands:
 
-3. **Preserve figures and original layout**
-   - Safest MVP approach: render each original page to a high-resolution image, then cover original text regions with white rectangles and draw translated Korean text into the same bounding boxes.
-   - Higher-fidelity approach: copy original PDF page content/images as a background or form XObject, then overlay translated text. This preserves vector figures better than rasterizing whole pages.
-   - Do not rely on `pdfkit` alone for this; use `pdf-lib`, `HummusJS` alternatives, or a Python service with `PyMuPDF` if exact page manipulation is required.
+- `pdftoppm` for page rasterization
+- `pdftotext` for coordinate-aware text extraction
 
-4. **Translate by layout block**
-   - Group text spans into paragraphs/captions using proximity and font information.
-   - Send each block to OpenAI with metadata such as page number, block type, and bounding-box size.
-   - Preserve equations, variables, citations, units, table numbers, and figure labels.
-   - Reflow Korean text into the original bounding box; if it does not fit, reduce font size down to a configured minimum or allow controlled overflow to the next line/page.
+If either command is missing, Paper Lens still returns the normal bilingual summary/translation report, but the `layoutTranslation` response has `status: "unavailable"` and the UI shows why the figure-preserving PDF could not be generated.
 
-5. **Render translated PDF**
-   - Use embedded Korean fonts such as Noto Sans KR or Noto Serif KR.
-   - Draw translated text at the original coordinates.
-   - Keep images/figures untouched.
-   - Add a short disclaimer in metadata or a final page if any block could not fit.
+## API flow
 
-6. **Integrate with current API**
-   - Add a new service, for example `server/services/layoutTranslationService.js`.
-   - Add a new route such as `POST /api/reports/translated-pdf` or attach `translatedReportId` to the existing `/api/analyze` response.
-   - Keep `server/services/pdfReportService.js` focused on summary reports; it currently creates a new report and explicitly does not include the original PDF.
+1. `/api/analyze` extracts text, summarizes, translates English papers, then tries to create the layout-preserving PDF while the uploaded source PDF still exists.
+2. If generation succeeds, the response includes:
 
-## Why this cannot be done reliably with the current code path
+   ```json
+   {
+     "layoutTranslation": {
+       "status": "ready",
+       "downloadPath": "/api/reports/<reportId>.layout-translated.pdf"
+     }
+   }
+   ```
 
-- `server/services/pdfService.js` uses `pdf-parse`, which returns plain text and metadata, not original figure geometry or page drawing instructions.
-- `server/services/pdfReportService.js` creates a new report from normalized summary/translation data, so it has no access to original page objects or figure coordinates.
-- Exact figure preservation requires page-level PDF rendering/copying, coordinate-aware text extraction, and overlay rendering.
+3. The client displays a `Figure 보존 번역 PDF` download button.
+4. The binary PDF is held in memory for 30 minutes, matching the existing report cache behavior.
 
-## Suggested implementation phases
+## Current limitations
 
-### Phase 1: Proof of concept
+- This MVP preserves figures by using the original page as a raster background. It is visually close to the source, but not a fully editable/vector-preserving PDF.
+- Text block detection quality depends on the PDF's internal text layer. Complex multi-column layouts, tables, equations, or overlapping annotations may require manual tuning.
+- Korean text can be longer than the original English block. The renderer reduces font size and clips overflow when needed.
+- Scanned PDFs still need OCR before this pipeline can identify text boxes.
+- Full-paper translation can take longer and use more OpenAI tokens than summary-only analysis.
 
-- Render original pages as backgrounds.
-- Detect text blocks and cover/rewrite them in Korean.
-- Preserve all figures visually because they remain part of the background.
-- Exclude references by dropping pages or masking text after the references heading.
+## Future improvements
 
-### Phase 2: Better text quality
-
-- Add block fitting, font-size adjustment, and caption/table detection.
-- Add a review log for blocks that overflow or could not be translated.
-
-### Phase 3: Production fidelity
-
-- Preserve vector figures without rasterizing full pages.
+- Preserve vector figures without rasterizing full pages by copying original PDF page objects/form XObjects.
+- Translate per detected paragraph/caption instead of flowing a global translation paragraph list into detected blocks.
 - Add OCR for scanned PDFs.
-- Add job queue/background processing because full-paper translation can take minutes and many OpenAI calls.
+- Move long layout-preserving translation work to a background job queue.
