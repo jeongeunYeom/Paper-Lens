@@ -14,6 +14,10 @@ const DEFAULT_RENDER_DPI = Number(process.env.LAYOUT_TRANSLATION_RENDER_DPI || 1
 const POPPLER_TIMEOUT_MS = Number(process.env.LAYOUT_TRANSLATION_POPPLER_TIMEOUT_MS || 180000);
 const RENDER_DPI_CANDIDATES = [...new Set([DEFAULT_RENDER_DPI, 140, 110, 90].filter((dpi) => Number.isFinite(dpi) && dpi > 0))];
 const EMPTY_TRANSLATION_MESSAGE = '번역할 본문을 찾지 못했습니다.';
+const OVERLAY_FONT_SIZE = Number(process.env.LAYOUT_TRANSLATION_FONT_SIZE || 8.8);
+const OVERLAY_LINE_GAP = Number(process.env.LAYOUT_TRANSLATION_LINE_GAP || 2);
+const MIN_WRITABLE_BLOCK_WIDTH = 110;
+const MIN_WRITABLE_BLOCK_HEIGHT = 12;
 const FONT_CANDIDATES = [
   process.env.REPORT_FONT_PATH,
   path.join(repoRoot, 'fonts/NotoSansKR-Regular.otf'),
@@ -261,31 +265,39 @@ async function renderTranslatedOverlayPdf({ layout, pageImages, translation, rep
     doc.on('error', reject);
 
     registerFont(doc);
-    const paragraphs = splitTranslationParagraphs(translation.body);
-    let paragraphIndex = 0;
+    const translatedText = normalizeTranslationText(translation.body);
+    let cursor = 0;
+    let renderedPageCount = 0;
 
-    layout.pages.forEach((page, pageIndex) => {
-      if (layout.referenceStart && pageIndex > layout.referenceStart.pageIndex) return;
+    for (let pageIndex = 0; pageIndex < layout.pages.length; pageIndex += 1) {
+      const page = layout.pages[pageIndex];
+      if (layout.referenceStart && pageIndex > layout.referenceStart.pageIndex) break;
+      if (cursor >= translatedText.length && renderedPageCount > 0) break;
+
+      const blocks = getWritableBlocks(page, pageIndex, layout.referenceStart);
+      if (!blocks.length) continue;
+
       doc.addPage({ size: [page.width, page.height], margin: 0 });
+      renderedPageCount += 1;
       if (pageImages[pageIndex]) doc.image(pageImages[pageIndex], 0, 0, { width: page.width, height: page.height });
 
-      const blocks = page.blocks.filter((block) => shouldTranslateBlock(block, pageIndex, layout.referenceStart));
+      coverDetectedText(doc, page, pageIndex, layout.referenceStart);
       for (const block of blocks) {
-        const translatedText = paragraphs[paragraphIndex] || '';
-        coverBlock(doc, block);
-        if (translatedText) {
-          drawTranslatedBlock(doc, block, translatedText);
-          paragraphIndex += 1;
-        }
+        if (cursor >= translatedText.length) break;
+        const next = takeTextForBlock(doc, translatedText, cursor, block);
+        if (!next.text) continue;
+        drawTranslatedBlock(doc, block, next.text);
+        cursor = next.cursor;
       }
 
       if (layout.referenceStart?.pageIndex === pageIndex) {
         coverReferenceTail(doc, page, layout.referenceStart.yMin);
       }
-    });
+    }
 
-    if (!paragraphs.length) {
+    if (!renderedPageCount) {
       doc.addPage({ size: 'A4', margin: 44 });
+      registerFont(doc);
       doc.fontSize(12).fillColor('#111827').text(EMPTY_TRANSLATION_MESSAGE);
     }
     addPageNumbers(doc);
@@ -293,46 +305,92 @@ async function renderTranslatedOverlayPdf({ layout, pageImages, translation, rep
   });
 }
 
-function shouldTranslateBlock(block, pageIndex, referenceStart) {
-  if (referenceStart && pageIndex === referenceStart.pageIndex && block.yMin >= referenceStart.yMin) return false;
-  return block.text.length > 12 && /[A-Za-z가-힣]/.test(block.text);
+function coverDetectedText(doc, page, pageIndex, referenceStart) {
+  for (const line of page.lines) {
+    if (referenceStart && pageIndex === referenceStart.pageIndex && line.yMin >= referenceStart.yMin) continue;
+    coverRect(doc, line.xMin, line.yMin, line.xMax, line.yMax, 2.4);
+  }
 }
 
-function splitTranslationParagraphs(body) {
-  const paragraphs = String(body || '')
+function getWritableBlocks(page, pageIndex, referenceStart) {
+  return page.blocks
+    .filter((block) => isWritableBlock(block, pageIndex, referenceStart))
+    .sort((a, b) => a.yMin - b.yMin || a.xMin - b.xMin);
+}
+
+function isWritableBlock(block, pageIndex, referenceStart) {
+  if (referenceStart && pageIndex === referenceStart.pageIndex && block.yMin >= referenceStart.yMin) return false;
+  const width = block.xMax - block.xMin;
+  const height = block.yMax - block.yMin;
+  if (width < MIN_WRITABLE_BLOCK_WIDTH || height < MIN_WRITABLE_BLOCK_HEIGHT) return false;
+  if (!/[A-Za-z가-힣]/.test(block.text) || block.text.length < 18) return false;
+  return true;
+}
+
+function normalizeTranslationText(body) {
+  return String(body || '')
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
-
-  return paragraphs.flatMap((paragraph) => splitLongParagraphForBlocks(paragraph));
+    .filter(Boolean)
+    .join('\n\n');
 }
 
-function splitLongParagraphForBlocks(paragraph) {
-  if (paragraph.length <= 420) return [paragraph];
+function takeTextForBlock(doc, text, cursor, block) {
+  let start = skipWhitespace(text, cursor);
+  if (start >= text.length) return { text: '', cursor: start };
 
-  const sentences = paragraph
-    .replace(/([.!?。다])\s*(?=[A-Z가-힣0-9])/g, '$1|')
-    .split('|')
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
-  const chunks = [];
-  let current = '';
-  for (const sentence of sentences.length ? sentences : [paragraph]) {
-    if (`${current} ${sentence}`.trim().length > 420 && current) {
-      chunks.push(current);
-      current = sentence;
-    } else {
-      current = current ? `${current} ${sentence}` : sentence;
-    }
+  const width = Math.max(block.xMax - block.xMin - 4, 40);
+  const height = Math.max(block.yMax - block.yMin - 4, 10);
+  const capacity = estimateCharacterCapacity(width, height);
+  if (capacity < 12) return { text: '', cursor: start };
+
+  let end = Math.min(text.length, start + capacity);
+  if (end < text.length) {
+    const paragraphBreak = text.slice(start, end).lastIndexOf('\n\n');
+    const sentenceBreak = Math.max(
+      text.slice(start, end).lastIndexOf('. '),
+      text.slice(start, end).lastIndexOf('다. '),
+      text.slice(start, end).lastIndexOf('? '),
+      text.slice(start, end).lastIndexOf('! ')
+    );
+    const wordBreak = text.slice(start, end).lastIndexOf(' ');
+    const breakAt = [paragraphBreak, sentenceBreak >= 0 ? sentenceBreak + 1 : -1, wordBreak]
+      .filter((index) => index > Math.min(24, capacity * 0.35))
+      .sort((a, b) => b - a)[0];
+    if (breakAt) end = start + breakAt;
   }
-  if (current) chunks.push(current);
-  return chunks;
+
+  let candidate = text.slice(start, end).trim();
+  while (candidate && !fitsBlock(doc, candidate, width, height)) {
+    const shorter = candidate.slice(0, Math.floor(candidate.length * 0.9));
+    const lastSpace = shorter.lastIndexOf(' ');
+    candidate = shorter.slice(0, lastSpace > 20 ? lastSpace : shorter.length).trim();
+    end = start + candidate.length;
+  }
+
+  return { text: candidate, cursor: skipWhitespace(text, end) };
 }
 
-function coverBlock(doc, block) {
-  const padding = 1.8;
+function skipWhitespace(text, cursor) {
+  let index = cursor;
+  while (index < text.length && /\s/.test(text[index])) index += 1;
+  return index;
+}
+
+function estimateCharacterCapacity(width, height) {
+  const charsPerLine = Math.max(8, Math.floor(width / (OVERLAY_FONT_SIZE * 0.62)));
+  const lineCount = Math.max(1, Math.floor(height / (OVERLAY_FONT_SIZE + OVERLAY_LINE_GAP)));
+  return Math.floor(charsPerLine * lineCount * 0.9);
+}
+
+function fitsBlock(doc, text, width, height) {
+  doc.fontSize(OVERLAY_FONT_SIZE);
+  return doc.heightOfString(text, { width, lineGap: OVERLAY_LINE_GAP }) <= height + 1;
+}
+
+function coverRect(doc, xMin, yMin, xMax, yMax, padding = 1.8) {
   doc.save()
-    .rect(block.xMin - padding, block.yMin - padding, block.xMax - block.xMin + padding * 2, block.yMax - block.yMin + padding * 2)
+    .rect(xMin - padding, yMin - padding, xMax - xMin + padding * 2, yMax - yMin + padding * 2)
     .fill('#ffffff')
     .restore();
 }
@@ -345,23 +403,17 @@ function coverReferenceTail(doc, page, yMin) {
 }
 
 function drawTranslatedBlock(doc, block, text) {
-  const width = Math.max(block.xMax - block.xMin, 80);
-  const height = Math.max(block.yMax - block.yMin, 16);
-  const fontSize = chooseFontSize(doc, text, width, height);
-  doc.fillColor('#111827').fontSize(fontSize).text(text, block.xMin, block.yMin, {
+  const x = block.xMin + 2;
+  const y = block.yMin + 1;
+  const width = Math.max(block.xMax - block.xMin - 4, 40);
+  const height = Math.max(block.yMax - block.yMin - 2, 10);
+  doc.fillColor('#111827').fontSize(OVERLAY_FONT_SIZE).text(text, x, y, {
     width,
     height,
-    lineGap: 1,
+    align: 'left',
+    lineGap: OVERLAY_LINE_GAP,
     ellipsis: true
   });
-}
-
-function chooseFontSize(doc, text, width, height) {
-  for (let size = 9.5; size >= 5.5; size -= 0.5) {
-    doc.fontSize(size);
-    if (doc.heightOfString(text, { width, lineGap: 1 }) <= height + 2) return size;
-  }
-  return 5.5;
 }
 
 function registerFont(doc) {
