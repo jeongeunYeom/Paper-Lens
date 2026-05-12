@@ -7,6 +7,7 @@ import { normalizeSummary, splitIntoParagraphs, toBulletItems } from './summaryF
 const serviceDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(serviceDir, '../..');
 const EMPTY_MESSAGE = '해당 내용을 명확히 찾지 못했습니다.';
+const SECTION_INSET = 36;
 const FONT_CANDIDATES = [
   process.env.REPORT_FONT_PATH,
   path.join(repoRoot, 'fonts/NotoSansKR-Regular.otf'),
@@ -115,39 +116,66 @@ function renderInfoCard(doc, summary) {
 }
 
 function renderSection(doc, title, content, { bullets = false } = {}) {
+  const layout = getSectionLayout(doc);
   const items = bullets ? toBulletItems(content, { maxItems: 6, maxLength: 180 }) : splitIntoParagraphs(content || EMPTY_MESSAGE, { sentencesPerParagraph: 2, maxParagraphs: 4 });
-  const estimatedHeight = 44 + items.length * 34;
+  const renderedItems = items.length ? items : [EMPTY_MESSAGE];
+  const estimatedHeight = estimateSectionHeight(doc, title, renderedItems, { bullets, layout });
   ensureSpace(doc, estimatedHeight);
 
-  doc.moveDown(0.3);
-  doc.fillColor('#12357c').fontSize(14).text(title, { continued: false });
   doc.moveDown(0.35);
+  doc.fillColor('#12357c').fontSize(14).text(title, layout.x, doc.y, { width: layout.width, lineGap: 1 });
+  doc.moveDown(0.45);
 
   if (bullets) {
-    const bulletItems = items.length ? items : [EMPTY_MESSAGE];
-    bulletItems.forEach((item) => renderBullet(doc, item));
+    renderedItems.forEach((item) => renderBullet(doc, item, layout));
   } else {
-    items.forEach((paragraph) => {
-      doc.fillColor('#1f2937').fontSize(10.5).text(paragraph, {
-        width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
-        lineGap: 5,
-        paragraphGap: 7
-      });
-      doc.moveDown(0.25);
-    });
+    renderedItems.forEach((paragraph) => renderParagraph(doc, paragraph, layout));
   }
-  doc.moveDown(0.55);
+  doc.moveDown(0.7);
 }
 
-function renderBullet(doc, text) {
-  const x = doc.page.margins.left;
+function estimateSectionHeight(doc, title, items, { bullets, layout }) {
+  doc.fontSize(14);
+  const titleHeight = doc.heightOfString(title, { width: layout.width, lineGap: 1 });
+  const itemHeight = items.reduce((total, item) => {
+    doc.fontSize(10.5);
+    const width = bullets ? layout.width - 18 : layout.width;
+    const lineGap = bullets ? 4 : 5;
+    const spacing = bullets ? 7 : 9;
+    return total + doc.heightOfString(item, { width, lineGap }) + spacing;
+  }, 0);
+  return 28 + titleHeight + itemHeight;
+}
+
+function renderParagraph(doc, text, layout) {
+  doc.fillColor('#1f2937').fontSize(10.5).text(text, layout.x, doc.y, {
+    width: layout.width,
+    align: 'left',
+    lineGap: 5,
+    paragraphGap: 0
+  });
+  doc.moveDown(0.45);
+}
+
+function renderBullet(doc, text, layout) {
+  const bulletX = layout.x;
+  const textX = layout.x + 18;
   const y = doc.y + 4;
-  doc.circle(x + 4, y + 3, 2.2).fill('#2563eb');
-  doc.fillColor('#1f2937').fontSize(10.5).text(text, x + 16, doc.y, {
-    width: doc.page.width - doc.page.margins.left - doc.page.margins.right - 16,
+  doc.circle(bulletX + 4, y + 3, 2.2).fill('#2563eb');
+  doc.fillColor('#1f2937').fontSize(10.5).text(text, textX, doc.y, {
+    width: layout.width - 18,
+    align: 'left',
     lineGap: 4
   });
   doc.moveDown(0.35);
+}
+
+function getSectionLayout(doc) {
+  const x = doc.page.margins.left + SECTION_INSET;
+  return {
+    x,
+    width: doc.page.width - doc.page.margins.left - doc.page.margins.right - (SECTION_INSET * 2)
+  };
 }
 
 function ensureSpace(doc, neededHeight) {
