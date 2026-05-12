@@ -1,0 +1,18 @@
+{
+  "name": "paper-lens",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PDF 논문 요약 및 유사 논문 추천 웹앱",
+  "workspaces": [
+    "server"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace server",
+    "start": "npm run start --workspace server",
+    "build": "echo \"Static HTML client does not require a build step\"",
+    "lint": "npm run lint --workspace server"
+  },
+  "engines": {
+    "node": ">=20 <23"
+  }
+}
