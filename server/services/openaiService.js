@@ -42,12 +42,17 @@ const SUMMARY_SCHEMA = {
   }
 };
 
-const client = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+const OPENAI_REQUEST_TIMEOUT_MS = Number(process.env.OPENAI_REQUEST_TIMEOUT_MS || 180000);
+const OPENAI_MAX_RETRIES = Number(process.env.OPENAI_MAX_RETRIES || 2);
+const client = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: OPENAI_REQUEST_TIMEOUT_MS, maxRetries: OPENAI_MAX_RETRIES })
+  : null;
 const isMockSummaryEnabled = isEnabled(process.env.USE_MOCK_SUMMARY);
 const isRuleBasedFallbackEnabled = isEnabled(process.env.ALLOW_RULE_BASED_FALLBACK);
 const FALLBACK_MESSAGE = 'OpenAI API 없이 규칙 기반으로 추출한 요약입니다. 실제 AI 요약보다 정확도가 낮을 수 있습니다.';
-const TRANSLATION_CHUNK_SIZE = Number(process.env.TRANSLATION_CHUNK_SIZE || 6000);
-const MAX_TRANSLATION_INPUT_CHARS = Number(process.env.MAX_TRANSLATION_INPUT_CHARS || 30000);
+const TRANSLATION_CHUNK_SIZE = Number(process.env.TRANSLATION_CHUNK_SIZE || 3500);
+const MAX_TRANSLATION_INPUT_CHARS = Number(process.env.MAX_TRANSLATION_INPUT_CHARS || 20000);
+const TRANSLATION_RETRY_ATTEMPTS = Number(process.env.TRANSLATION_RETRY_ATTEMPTS || 3);
 const STOPWORDS = new Set([
   'the', 'and', 'for', 'that', 'with', 'this', 'from', 'are', 'was', 'were', 'have', 'has', 'had', 'not', 'but',
   'paper', 'study', 'research', 'using', 'based', 'between', 'these', 'those', 'their', 'which', 'into', 'than',
@@ -146,13 +151,44 @@ export async function translatePaperToKorean(text, pdfMetadata = {}) {
   }
 
   if (!client) {
-    throw createOpenAiError('영문 논문 전체 번역에는 OPENAI_API_KEY가 필요합니다.', 503);
+    return buildTranslationFailure(sourceLanguage, '영문 논문 전체 번역에는 OPENAI_API_KEY가 필요합니다.');
   }
 
-  try {
-    const chunks = chunkText(sourceText, TRANSLATION_CHUNK_SIZE);
-    const translatedChunks = [];
-    for (let index = 0; index < chunks.length; index += 1) {
+  const chunks = chunkText(sourceText, TRANSLATION_CHUNK_SIZE);
+  const translatedChunks = [];
+  const failedChunks = [];
+
+  for (let index = 0; index < chunks.length; index += 1) {
+    try {
+      translatedChunks.push(await translateChunkWithRetry(chunks[index], index, chunks.length));
+    } catch (error) {
+      console.warn(`OpenAI translation chunk ${index + 1}/${chunks.length} failed:`, error.message);
+      failedChunks.push(index + 1);
+      translatedChunks.push(`[번역 실패: ${index + 1}/${chunks.length}번째 본문 조각을 처리하지 못했습니다. ${getOpenAiErrorMessage(error)}]`);
+    }
+  }
+
+  const body = translatedChunks.filter(Boolean).join('\n\n');
+  if (!body) {
+    return buildTranslationFailure(sourceLanguage, '번역 결과를 생성하지 못했습니다. 잠시 후 다시 시도하거나 번역 입력 길이를 줄여 주세요.');
+  }
+
+  return {
+    sourceLanguage,
+    targetLanguage: 'ko',
+    status: failedChunks.length ? 'partial' : 'translated',
+    title: `${pdfMetadata.Title || '영문 논문'} 한국어 번역본`,
+    body,
+    note: failedChunks.length
+      ? `참고문헌 섹션은 제외했습니다. ${failedChunks.join(', ')}번째 본문 조각은 번역에 실패해 표시 문구로 대체했습니다.`
+      : '참고문헌 섹션은 제외했습니다. 현재 서버는 PDF 텍스트 추출 기반이므로 원본 figure 이미지를 동일하게 복제하지는 못하고, 텍스트와 캡션 번역을 중심으로 생성합니다.'
+  };
+}
+
+async function translateChunkWithRetry(chunk, index, total) {
+  let lastError;
+  for (let attempt = 1; attempt <= TRANSLATION_RETRY_ATTEMPTS; attempt += 1) {
+    try {
       const completion = await client.chat.completions.create({
         model: process.env.OPENAI_TRANSLATION_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini',
         temperature: 0.1,
@@ -167,24 +203,31 @@ export async function translatePaperToKorean(text, pdfMetadata = {}) {
               '설명이나 요약을 덧붙이지 말고 번역문만 반환하세요.'
             ].join('\n')
           },
-          { role: 'user', content: `번역할 본문 조각 ${index + 1}/${chunks.length}:\n\n${chunks[index]}` }
+          { role: 'user', content: `번역할 본문 조각 ${index + 1}/${total}:\n\n${chunk}` }
         ]
       });
-      translatedChunks.push(cleanText(completion.choices[0]?.message?.content || ''));
+      return cleanText(completion.choices[0]?.message?.content || '');
+    } catch (error) {
+      lastError = error;
+      if (attempt < TRANSLATION_RETRY_ATTEMPTS) await wait(700 * attempt);
     }
-
-    return {
-      sourceLanguage,
-      targetLanguage: 'ko',
-      status: 'translated',
-      title: `${pdfMetadata.Title || '영문 논문'} 한국어 번역본`,
-      body: translatedChunks.filter(Boolean).join('\n\n'),
-      note: '참고문헌 섹션은 제외했습니다. 현재 서버는 PDF 텍스트 추출 기반이므로 원본 figure 이미지를 동일하게 복제하지는 못하고, 텍스트와 캡션 번역을 중심으로 생성합니다.'
-    };
-  } catch (error) {
-    console.error('OpenAI translation failed:', error.message);
-    throw createOpenAiError(`OpenAI 번역에 실패했습니다: ${getOpenAiErrorMessage(error)}`, getOpenAiErrorStatus(error));
   }
+  throw lastError;
+}
+
+function buildTranslationFailure(sourceLanguage, message) {
+  return {
+    sourceLanguage,
+    targetLanguage: 'ko',
+    status: 'failed',
+    title: '한국어 번역본',
+    body: '',
+    note: message
+  };
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function stripReferences(text = '') {
@@ -232,6 +275,7 @@ function getOpenAiErrorStatus(error) {
 function getOpenAiErrorMessage(error) {
   if (error?.status === 401) return 'API 키가 올바르지 않거나 권한이 없습니다.';
   if (error?.status === 429) return '요청 한도 또는 결제/크레딧 상태를 확인해 주세요.';
+  if (/terminated|timeout|aborted|network/i.test(String(error?.message || error?.code || ''))) return '네트워크 연결이 중단되었습니다. 자동 재시도 후에도 실패했습니다.';
   return error?.message || '알 수 없는 오류';
 }
 

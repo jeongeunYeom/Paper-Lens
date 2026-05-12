@@ -4,8 +4,8 @@ Paper Lens now includes a first-pass layout-preserving translation pipeline for 
 
 ## What the first implementation does
 
-- Uses Poppler tools (`pdftoppm` and `pdftotext`) when they are available on the server.
-- Renders each original PDF page to a high-resolution PNG background.
+- Uses Poppler tools (`pdftoppm` and `pdftotext`) when they are available on the server, with sanitized error messages if a PDF cannot be rasterized.
+- Renders each original PDF page to a high-resolution PNG background and retries with lower DPI values if the first rasterization attempt fails.
 - Extracts text word bounding boxes with `pdftotext -bbox-layout`.
 - Groups words into lines/blocks, paints white rectangles over detected text blocks, and draws Korean translation text into those same block areas.
 - Keeps figures, charts, and visual layout visible because they remain part of the page background.
@@ -50,7 +50,7 @@ If either command is missing, Paper Lens still returns the normal bilingual summ
 - Text block detection quality depends on the PDF's internal text layer. Complex multi-column layouts, tables, equations, or overlapping annotations may require manual tuning.
 - Korean text can be longer than the original English block. The renderer reduces font size and clips overflow when needed.
 - Scanned PDFs still need OCR before this pipeline can identify text boxes.
-- Full-paper translation can take longer and use more OpenAI tokens than summary-only analysis.
+- Full-paper translation can take longer and use more OpenAI tokens than summary-only analysis. Each translation chunk is retried, and if a chunk still fails the app returns a partial translation rather than failing the whole analysis request.
 
 ## Future improvements
 

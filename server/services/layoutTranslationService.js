@@ -8,6 +8,8 @@ import PDFDocument from 'pdfkit';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_RENDER_DPI = Number(process.env.LAYOUT_TRANSLATION_RENDER_DPI || 180);
+const POPPLER_TIMEOUT_MS = Number(process.env.LAYOUT_TRANSLATION_POPPLER_TIMEOUT_MS || 180000);
+const RENDER_DPI_CANDIDATES = [...new Set([DEFAULT_RENDER_DPI, 140, 110, 90].filter((dpi) => Number.isFinite(dpi) && dpi > 0))];
 const EMPTY_TRANSLATION_MESSAGE = '번역할 본문을 찾지 못했습니다.';
 const FONT_CANDIDATES = [
   process.env.REPORT_FONT_PATH,
@@ -23,7 +25,7 @@ const FONT_CANDIDATES = [
 ].filter(Boolean);
 
 export async function createFigurePreservingTranslationPdf(sourcePdfPath, translation, { reportId = 'unknown' } = {}) {
-  if (!translation || translation.status !== 'translated' || !translation.body) {
+  if (!translation || !['translated', 'partial'].includes(translation.status) || !translation.body) {
     return null;
   }
 
@@ -32,8 +34,10 @@ export async function createFigurePreservingTranslationPdf(sourcePdfPath, transl
 
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'paper-lens-layout-'));
   try {
-    const layout = await extractLayout(sourcePdfPath, workDir);
-    const pageImages = await renderPages(sourcePdfPath, workDir);
+    const normalizedPdfPath = path.join(workDir, 'source.pdf');
+    await fs.copyFile(sourcePdfPath, normalizedPdfPath);
+    const layout = await extractLayout(normalizedPdfPath, workDir);
+    const pageImages = await renderPages(normalizedPdfPath, workDir);
     const pdf = await renderTranslatedOverlayPdf({ layout, pageImages, translation, reportId });
     return pdf;
   } finally {
@@ -64,19 +68,71 @@ function buildMissingToolError(command, cause) {
 
 async function extractLayout(sourcePdfPath, workDir) {
   const htmlPath = path.join(workDir, 'layout.html');
-  await execFileAsync('pdftotext', ['-bbox-layout', '-enc', 'UTF-8', sourcePdfPath, htmlPath], { timeout: 120000 });
+  await runPoppler('pdftotext', ['-bbox-layout', '-enc', 'UTF-8', sourcePdfPath, htmlPath]);
   const html = await fs.readFile(htmlPath, 'utf8');
   return parseBboxLayout(html);
 }
 
 async function renderPages(sourcePdfPath, workDir) {
-  const prefix = path.join(workDir, 'page');
-  await execFileAsync('pdftoppm', ['-png', '-r', String(DEFAULT_RENDER_DPI), sourcePdfPath, prefix], { timeout: 120000 });
+  let lastError;
+  for (const dpi of RENDER_DPI_CANDIDATES) {
+    const prefix = path.join(workDir, `page-${dpi}`);
+    try {
+      await runPoppler('pdftoppm', ['-png', '-r', String(dpi), sourcePdfPath, prefix]);
+      const images = await collectRenderedPages(workDir, `page-${dpi}`);
+      if (images.length) return images;
+      lastError = new Error(`pdftoppm 실행은 완료됐지만 ${dpi} DPI 이미지가 생성되지 않았습니다.`);
+    } catch (error) {
+      lastError = error;
+      await removeRenderedPages(workDir, `page-${dpi}`);
+      console.warn(`pdftoppm failed at ${dpi} DPI; trying fallback if available:`, error.message);
+    }
+  }
+  throw makePopplerFailure('pdftoppm', lastError, '원본 PDF 페이지를 이미지로 변환하지 못했습니다. PDF가 손상됐거나 Render 메모리/시간 제한에 걸렸을 수 있습니다.');
+}
+
+async function collectRenderedPages(workDir, prefixName) {
   const entries = await fs.readdir(workDir);
   return entries
-    .filter((entry) => /^page-\d+\.png$/.test(entry))
-    .sort((a, b) => Number(a.match(/\d+/)?.[0] || 0) - Number(b.match(/\d+/)?.[0] || 0))
+    .filter((entry) => new RegExp(`^${escapeRegExp(prefixName)}-\\d+\\.png$`).test(entry))
+    .sort((a, b) => Number(a.match(/(\\d+)\\.png$/)?.[1] || 0) - Number(b.match(/(\\d+)\\.png$/)?.[1] || 0))
     .map((entry) => path.join(workDir, entry));
+}
+
+async function removeRenderedPages(workDir, prefixName) {
+  const entries = await fs.readdir(workDir).catch(() => []);
+  await Promise.all(entries
+    .filter((entry) => entry.startsWith(`${prefixName}-`) && entry.endsWith('.png'))
+    .map((entry) => fs.rm(path.join(workDir, entry), { force: true })));
+}
+
+async function runPoppler(command, args) {
+  try {
+    return await execFileAsync(command, args, { timeout: POPPLER_TIMEOUT_MS, maxBuffer: 1024 * 1024 * 8 });
+  } catch (error) {
+    throw makePopplerFailure(command, error);
+  }
+}
+
+function makePopplerFailure(command, error, fallbackMessage = '') {
+  const details = sanitizePopplerDetails(error?.stderr || error?.stdout || error?.message || '');
+  const message = fallbackMessage || `${command} 처리 중 오류가 발생했습니다.`;
+  const wrapped = new Error(details ? `${message} (${details})` : message);
+  wrapped.status = error?.status || 422;
+  wrapped.cause = error;
+  return wrapped;
+}
+
+function sanitizePopplerDetails(value) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/\/[^ ]+/g, '[path]')
+    .trim()
+    .slice(0, 240);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function parseBboxLayout(html) {

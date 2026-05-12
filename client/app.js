@@ -130,7 +130,7 @@ function renderResults(analysis) {
     createCard('유사 논문 추천', createRecommendationList(analysis.recommendations || []))
   ];
 
-  if (analysis.translation?.status === 'translated') {
+  if (['translated', 'partial'].includes(analysis.translation?.status)) {
     resultCards.splice(2, 0, createTranslationPreviewCard(analysis.translation));
   } else if (analysis.translation?.sourceLanguage) {
     resultCards.splice(2, 0, createTextCard('번역본', analysis.translation.note));
